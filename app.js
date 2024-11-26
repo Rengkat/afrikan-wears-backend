@@ -1,7 +1,8 @@
 //load .env
-
+require("dotenv").config();
 //express
 const express = require("express");
+const connectDB = require("./db/connectDB");
 const app = express();
 
 // inbuilt modules
@@ -24,4 +25,13 @@ const app = express();
 
 // starting the app
 const port = 5000;
-app.listen(port, () => console.log(`Server running on port ${port}...`));
+const start = async () => {
+  try {
+    await connectDB(process.env.URI);
+    app.listen(port, () => console.log(`Server running on port ${port}...`));
+  } catch (error) {
+    console.log(error.message);
+    process.exit(1);
+  }
+};
+start();

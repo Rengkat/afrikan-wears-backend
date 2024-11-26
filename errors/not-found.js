@@ -1,7 +1,10 @@
-const CustomApiError = require("../middleware/error-handler");
-class NotFound extends CustomApiError {
+const CustomApiError = require("./custom-error");
+const { StatusCodes } = require("http-status-codes");
+
+class NotFoundError extends CustomApiError {
   constructor(message) {
     super(message);
+    this.statusCode = StatusCodes.NOT_FOUND;
   }
 }
-module.exports = NotFound;
+module.exports = NotFoundError;
