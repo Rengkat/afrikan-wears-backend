@@ -12,6 +12,7 @@ const app = express();
 // data base
 
 // route importations
+const authRoute = require("./routes/authRoute");
 
 // middleware importations
 const notFoundMiddleware = require("./middleware/not-found");
@@ -22,7 +23,7 @@ const errorHandlerMiddleware = require("./middleware/error-handler");
 // home route for documentation
 
 // route initialization
-
+app.use("/api/auth");
 // error initialization
 app.use(notFoundMiddleware);
 app.use(errorHandlerMiddleware);
