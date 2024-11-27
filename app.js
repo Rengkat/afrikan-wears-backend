@@ -23,7 +23,7 @@ const errorHandlerMiddleware = require("./middleware/error-handler");
 // home route for documentation
 
 // route initialization
-app.use("/api/auth");
+app.use("/api/auth", authRoute);
 // error initialization
 app.use(notFoundMiddleware);
 app.use(errorHandlerMiddleware);
