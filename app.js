@@ -14,6 +14,8 @@ const app = express();
 // route importations
 
 // middleware importations
+const notFoundMiddleware = require("./middleware/not-found");
+const errorHandlerMiddleware = require("./middleware/error-handler");
 
 // middleware initialization
 
@@ -22,7 +24,8 @@ const app = express();
 // route initialization
 
 // error initialization
-
+app.use(notFoundMiddleware);
+app.use(errorHandlerMiddleware);
 // starting the app
 const port = 5000;
 const start = async () => {
