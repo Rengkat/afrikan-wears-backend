@@ -1,8 +1,16 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
 const register = async (req, res, next) => {
+  const { name, email, password } = req.body;
   // check if details are present
+  if (!name || !email || !password) {
+    throw new CustomError.BadRequestError("Please provide all credentials");
+  }
   // check if the email exist
+  const existedUser = await User.findOne({ email });
+  if (existedUser) {
+    throw new CustomError.BadRequestError("Sorry, email already exist");
+  }
   // create verification token
   // create a user
   // send verification token
