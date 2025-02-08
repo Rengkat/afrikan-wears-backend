@@ -1,38 +1,40 @@
-//load .env
+// Load .env
 require("dotenv").config();
 const { Server } = require("socket.io");
 const http = require("http");
-//express and others
+
+// Express and middleware
 const cors = require("cors");
 const express = require("express");
+const cookieParser = require("cookie-parser");
+const expressFileUpload = require("express-fileupload");
+
 const app = express();
 const server = http.createServer(app);
 
-// rest of packages
-
-// data base
+// Database connection
 const connectDB = require("./db/connectDB");
 
-// route importations
+// Route imports
 const authRoute = require("./routes/authRoute");
 
-// middleware importations
+// Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
 const errorHandlerMiddleware = require("./middleware/error-handler");
 
-// middleware initialization
+// Middleware setup
+app.use(express.json());
+app.use(cookieParser());
+app.use(expressFileUpload({ useTempFiles: true }));
+app.use(express.static("public"));
 
-// home route for documentation
-
-// socket initialization
-const io = new Server(server, {
-  cors: {
-    origin: "",
-    credentials: true,
-  },
+// Home route for documentation
+app.get("/", (req, res) => {
+  res.send("Welcome to the API");
 });
-// route initialization
-const allowedOrigins = ["http://localhost:3000"];
+
+// CORS setup
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:3000"];
 
 app.use(
   cors({
@@ -46,23 +48,38 @@ app.use(
     credentials: true,
   })
 );
+
+// Socket.io initialization
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
+  },
+});
+
+// Attach socket instance to request object
 app.use((req, res, next) => {
   req.io = io;
   next();
 });
+
+// Routes
 app.use("/api/auth", authRoute);
-// error initialization
+
+// Error handling middleware
 app.use(notFoundMiddleware);
 app.use(errorHandlerMiddleware);
-// starting the app
-const port = 5000;
+
+// Start the server
+const port = process.env.PORT || 5000;
 const start = async () => {
   try {
     await connectDB(process.env.MONGO_URI);
     server.listen(port, () => console.log(`Server running on port ${port}...`));
   } catch (error) {
-    console.log(error.message);
+    console.error("Database connection failed:", error.message);
     process.exit(1);
   }
 };
+
 start();
