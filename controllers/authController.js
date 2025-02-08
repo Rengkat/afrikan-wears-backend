@@ -1,7 +1,7 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
 const register = async (req, res, next) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, company } = req.body;
   // check if details are present
   if (!name || !email || !password) {
     throw new CustomError.BadRequestError("Please provide all credentials");
