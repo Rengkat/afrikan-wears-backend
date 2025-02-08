@@ -3,6 +3,7 @@ require("dotenv").config();
 const { Server } = require("socket.io");
 const http = require("http");
 //express and others
+const cors = require("cors");
 const express = require("express");
 const app = express();
 const server = http.createServer(app);
@@ -31,6 +32,20 @@ const io = new Server(server, {
   },
 });
 // route initialization
+const allowedOrigins = ["http://localhost:3000"];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  })
+);
 app.use((req, res, next) => {
   req.io = io;
   next();
