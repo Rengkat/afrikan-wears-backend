@@ -11,13 +11,9 @@ const AddressSchema = new mongoose.Schema({
 });
 const UserSchema = new mongoose.Schema(
   {
-    firstName: {
+    name: {
       type: String,
-      required: [true, "First name can't be empty"],
-    },
-    surname: {
-      type: String,
-      required: [true, "Surname can't be empty"],
+      required: [true, "name can't be empty"],
     },
     email: {
       type: String,
@@ -58,9 +54,7 @@ const UserSchema = new mongoose.Schema(
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
-UserSchema.virtual("fullName").get(function () {
-  return `${this.firstName} ${this.surname}`;
-});
+
 UserSchema.pre("save", async function () {
   if (!this.isModified("password")) {
     return;

@@ -8,6 +8,7 @@ const cors = require("cors");
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const expressFileUpload = require("express-fileupload");
+const morgan = require("morgan");
 
 const app = express();
 const server = http.createServer(app);
