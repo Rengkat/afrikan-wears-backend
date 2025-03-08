@@ -1,5 +1,7 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
+const crypto = require("crypto");
+const { StatusCodes } = require("http-status-codes");
 const register = async (req, res, next) => {
   const { name, email, password, company } = req.body;
   // check if details are present
@@ -12,9 +14,23 @@ const register = async (req, res, next) => {
     throw new CustomError.BadRequestError("Sorry, email already exist");
   }
   // create verification token
+  const verificationToken = crypto.randomBytes(40).toString("hex");
+  const expiration = new Date(new Date.now() + 1000 * 60 * 60);
   // create a user
-  // send verification token
+  const user = await User.create({
+    name,
+    email,
+    password,
+    company,
+    verificationToken,
+    verificationTokenExpirationDate: expiration,
+  });
+  // send verification token email
   // return response
+  res.status(StatusCodes.CREATED).json({
+    message: "Registration successful. Please check your email and verify it",
+    success: true,
+  });
 };
 const verifyEmail = async (req, res, next) => {
   // check if details are passed
