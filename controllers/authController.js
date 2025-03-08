@@ -1,5 +1,6 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
+const createUserPayload = require("../utils/userPayload");
 const crypto = require("crypto");
 const { StatusCodes } = require("http-status-codes");
 const sendVerificationEmail = require("../utils/Email/sendVerificationMail");
@@ -71,10 +72,27 @@ const verifyEmail = async (req, res, next) => {
 };
 const login = async (req, res, next) => {
   // check if detail provided
+  const { email, password } = req.body;
+  if (!email || !password) {
+    throw new CustomError("Provide all credentials");
+  }
   // check if user exist with email
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new CustomError.NotFoundError("User not found");
+  }
   // check if password is correct
+  const isPasswordCorrect = user.comparePassword(password);
+  if (!isPasswordCorrect) {
+    throw new CustomError.BadRequestError("Incorrect password");
+  }
   // check if verified
+  if (!user.isVerified) {
+    throw new CustomError("Please verify your email");
+  }
   // create access token
+  let refreshToken;
+  const accessToken = createUserPayload(user);
   // check if refresh token exist
   // if exist reset the refresh token and the access token and return it
   // if refresh token does not exist, create one
