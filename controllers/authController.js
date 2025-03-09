@@ -96,6 +96,9 @@ const login = async (req, res, next) => {
   // check if refresh token exist
   // if exist reset the refresh token and the access token and return it
   // if refresh token does not exist, create one
+  refreshToken = crypto.randomBytes(40).toString("hex");
+  const ip = req.ip;
+  const userAgent = req.headers["user-agent"];
   // create access token again
   // return response
 };
