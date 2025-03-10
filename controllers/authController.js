@@ -1,5 +1,6 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
+const Token = require("../models/tokenModel");
 const register = async (req, res, next) => {
   const { name, email, password, company } = req.body;
   // check if details are present
@@ -45,14 +46,17 @@ const verifyEmail = async (req, res, next) => {
     throw new CustomError.NotFoundError("User not found");
   }
   // check expiring of verify code and return
-  if (user.verificationTokenExpirationDate > new Date(Date.now())) {
-    throw new CustomError.BadRequestError("Verification token has expired. Please request new one");
+  if (new Date() > user.verificationTokenExpirationDate) {
+    throw new CustomError.BadRequestError(
+      "Verification token has expired. Please request a new one."
+    );
   }
   // check if verification code is same
   if (user.verificationToken !== verificationToken) {
     throw new CustomError.BadRequestError("Invalid token");
   }
   // set user as verify and clear verification
+  user.isVerified = true;
   user.verificationToken = null;
   user.verificationTokenExpirationDate = null;
   await user.save();
@@ -71,16 +75,38 @@ const login = async (req, res, next) => {
     throw new CustomError.NotFoundError("User not found");
   }
   // check if password is correct
+  const isPasswordCorrect = user.comparePassword(password);
+  if (!isPasswordCorrect) {
+    throw new CustomError.NotFoundError("Password wrong! Please enter correct password");
+  }
+
   // check if verified
+  if (!user.isVerified) {
+    throw new CustomError.NotFoundError("Please verify your email");
+  }
   // create access token
   let refreshToken;
-  const accessToken = createUserPayload(user);
+  const userPayload = createUserPayload(user);
   // check if refresh token exist
+  const refreshTokenExist = await Token.findOne({ user: user._id });
   // if exist reset the refresh token and the access token and return it
-  // if refresh token does not exist, create one
+  if (refreshTokenExist) {
+    if (!refreshTokenExist.isValid) {
+      throw new CustomError.UnauthenticatedError("Invalid credentials");
+    }
+    refreshToken = refreshTokenExist.refreshToken;
+    // if refresh token does not exist, create one
+    return res.status(StatusCodes.OK).json({
+      message: "login successfully",
+      user: accessToken,
+      success: true,
+    });
+  }
   refreshToken = crypto.randomBytes(40).toString("hex");
   const ip = req.ip;
   const userAgent = req.headers["user-agent"];
+  const refreshTokenPayload = { refreshToken, ip, userAgent };
+  await Token.create(refreshTokenPayload);
   // create access token again
   // return response
   res.status(StatusCodes.OK).json({
