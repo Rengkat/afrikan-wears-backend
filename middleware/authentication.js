@@ -1,3 +1,4 @@
+const CustomError = require("../errors");
 const { isTokenVerified, attachTokenToResponse } = require("../utils");
 
 const authenticateUser = async (req, res, next) => {
@@ -30,3 +31,10 @@ const authenticateUser = async (req, res, next) => {
   });
   req.user = payload.accessToken;
 };
+const AdminAuthorization = async (req, res, next) => {
+  if (req.user.role !== "admin") {
+    throw new CustomError.UnauthorizedError("Not authorized to access this route");
+  }
+  next();
+};
+module.exports = { authenticateUser };
