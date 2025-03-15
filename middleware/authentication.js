@@ -31,10 +31,18 @@ const authenticateUser = async (req, res, next) => {
   });
   req.user = payload.accessToken;
 };
-const AdminAuthorization = async (req, res, next) => {
+const adminAuthorization = async (req, res, next) => {
   if (req.user.role !== "admin") {
     throw new CustomError.UnauthorizedError("Not authorized to access this route");
   }
   next();
 };
-module.exports = { authenticateUser };
+const stylistAuthorization = async (req, res, next) => {
+  if (req.user.role !== "stylist") {
+    throw new CustomError.UnauthorizedError(
+      "Not authorized to access this route. Only for stylist"
+    );
+  }
+  next();
+};
+module.exports = { authenticateUser, adminAuthorization, stylistAuthorization };
