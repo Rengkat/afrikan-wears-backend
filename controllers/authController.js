@@ -166,7 +166,31 @@ const forgotPassword = async (req, res, next) => {
     next(error);
   }
 };
-const resetPassword = async (req, res, next) => {};
+const resetPassword = async (req, res, next) => {
+  try {
+    const { email, verificationToken, password } = req.body;
+    if (!email || !verificationToken || !password) {
+      throw new CustomError.BadRequestError("Please provide all credentials");
+    }
+
+    const user = await User.findOne({ email });
+    if (user) {
+      if (verificationToken !== user.verificationToken) {
+        throw new CustomError.BadRequestError("Verification failed");
+      }
+      if (new Date() > user.verificationTokenExpirationDate) {
+        throw new CustomError.BadRequestError("Verification code expired. Please reverify");
+      }
+      user.password = password;
+      user.verificationToken = null;
+      user.verificationTokenExpirationDate = null;
+      await user.save();
+    }
+    res.status(StatusCodes.OK).json({ message: "Password successfully reset", success: true });
+  } catch (error) {
+    next(error);
+  }
+};
 module.exports = {
   register,
   verifyEmail,
