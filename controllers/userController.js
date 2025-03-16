@@ -82,3 +82,4 @@ const deleteUser = async (req, res, next) => {
     next(error);
   }
 };
+module.exports = { getAllUsers, getDetailUser, updateCurrentUser, updateUser, deleteUser };
