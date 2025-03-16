@@ -45,5 +45,27 @@ const updateCurrentUser = async (req, res, next) => {
     next(error);
   }
 };
-const updateUser = async (req, res, next) => {};
+const updateUser = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { name, email, role, addresses } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      throw new CustomError.NotFoundError(`User with ID ${id} not found`);
+    }
+
+    // Update user fields
+    user.name = name || user.name;
+    user.email = email || user.email;
+    user.role = role || user.role;
+    user.addresses = addresses || user.addresses;
+
+    await user.save();
+
+    res.status(StatusCodes.OK).json({ success: true, user });
+  } catch (error) {
+    next(error);
+  }
+};
 const deleteUser = async (req, res, next) => {};
