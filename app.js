@@ -18,6 +18,7 @@ const connectDB = require("./db/connectDB");
 
 // Route imports
 const authRoute = require("./routes/authRoute");
+const productRoute = require("./routes/productRoute");
 
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
@@ -66,6 +67,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use("/api/auth", authRoute);
+app.use("/api/products", productRoute);
 
 // Error handling middleware
 app.use(notFoundMiddleware);
