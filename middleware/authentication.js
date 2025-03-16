@@ -45,4 +45,17 @@ const stylistAuthorization = async (req, res, next) => {
   }
   next();
 };
-module.exports = { authenticateUser, adminAuthorization, stylistAuthorization };
+const adminAndStylistAuthorization = (...roles) => {
+  return async (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return next(new CustomError.UnauthorizedError("You are not authorized!"));
+    }
+    next();
+  };
+};
+module.exports = {
+  authenticateUser,
+  adminAuthorization,
+  stylistAuthorization,
+  adminAndStylistAuthorization,
+};
