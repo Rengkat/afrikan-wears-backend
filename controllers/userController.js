@@ -68,4 +68,17 @@ const updateUser = async (req, res, next) => {
     next(error);
   }
 };
-const deleteUser = async (req, res, next) => {};
+const deleteUser = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findByIdAndDelete(id);
+    if (!user) {
+      throw new CustomError.NotFoundError(`User with ID ${id} not found`);
+    }
+
+    res.status(StatusCodes.OK).json({ success: true, message: "User deleted successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
