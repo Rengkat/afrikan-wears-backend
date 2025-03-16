@@ -33,7 +33,18 @@ const addProduct = async (req, res, next) => {
     next(error);
   }
 };
-const getAllProducts = async (req, res, next) => {};
+const getAllProducts = async (req, res, next) => {
+  try {
+    const products = await Product.find({})
+      .populate("brand", "name")
+      .populate("category", "name")
+      .populate("reviews.user", "name");
+
+    res.status(200).json({ success: true, count: products.length, products });
+  } catch (error) {
+    next(error);
+  }
+};
 const getDetailProduct = async (req, res, next) => {};
 const updateProduct = async (req, res, next) => {};
 const deleteProduct = async (req, res, next) => {};
