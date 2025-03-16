@@ -19,7 +19,7 @@ const connectDB = require("./db/connectDB");
 // Route imports
 const authRoute = require("./routes/authRoute");
 const productRoute = require("./routes/productRoute");
-
+const userRoute = require("./routes/userRouter");
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
 const errorHandlerMiddleware = require("./middleware/error-handler");
@@ -68,6 +68,7 @@ app.use((req, res, next) => {
 // Routes
 app.use("/api/auth", authRoute);
 app.use("/api/products", productRoute);
+app.use("/api/users", userRoute);
 
 // Error handling middleware
 app.use(notFoundMiddleware);
