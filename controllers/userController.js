@@ -10,7 +10,20 @@ const getAllUsers = async (req, res, next) => {
     next(error);
   }
 };
-const getDetailUser = async (req, res, next) => {};
+const getDetailUser = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id).select("-password");
+    if (!user) {
+      throw new CustomError.NotFoundError(`User with ID ${id} not found`);
+    }
+
+    res.status(StatusCodes.OK).json({ success: true, user });
+  } catch (error) {
+    next(error);
+  }
+};
 const updateCurrentUser = async (req, res, next) => {};
 const updateUser = async (req, res, next) => {};
 const deleteUser = async (req, res, next) => {};
