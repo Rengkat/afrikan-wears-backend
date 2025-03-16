@@ -86,10 +86,24 @@ const updateProduct = async (req, res, next) => {
 
     await product.save();
 
-    res.status(200).json({ success: true, product, message: "product updated" });
+    res.status(StatusCodes.OK).json({ success: true, product, message: "product updated" });
   } catch (error) {
     next(error);
   }
 };
-const deleteProduct = async (req, res, next) => {};
+const deleteProduct = async (req, res, next) => {
+  try {
+    const { productId: id } = req.params;
+
+    const product = await Product.findByIdAndDelete(id);
+
+    if (!product) {
+      throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
+    }
+
+    res.status(StatusCodes.OK).json({ success: true, message: "Product deleted successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
 module.exports = { addProduct, getAllProducts, getDetailProduct, updateProduct, deleteProduct };
