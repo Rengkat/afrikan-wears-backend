@@ -20,11 +20,14 @@ const connectDB = require("./db/connectDB");
 const authRoute = require("./routes/authRoute");
 const productRoute = require("./routes/productRoute");
 const userRoute = require("./routes/userRouter");
+const cartRouter = require("./routes/cartRoute");
+
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
 const errorHandlerMiddleware = require("./middleware/error-handler");
 
 // Middleware setup
+app.use(morgan());
 app.use(express.json());
 app.use(cookieParser());
 app.use(expressFileUpload({ useTempFiles: true }));
@@ -32,7 +35,7 @@ app.use(express.static("public"));
 
 // Home route for documentation
 app.get("/", (req, res) => {
-  res.send("Welcome to the API");
+  res.send("Welcome to AfrikanWears API");
 });
 
 // CORS setup
@@ -69,6 +72,7 @@ app.use((req, res, next) => {
 app.use("/api/auth", authRoute);
 app.use("/api/products", productRoute);
 app.use("/api/users", userRoute);
+app.use("/api/carts", cartRouter);
 
 // Error handling middleware
 app.use(notFoundMiddleware);

@@ -36,6 +36,7 @@ const addProduct = async (req, res, next) => {
 const getAllProducts = async (req, res, next) => {
   try {
     const products = await Product.find({})
+      .select("name, price, image, rating")
       .populate("brand", "name")
       .populate("category", "name")
       .populate("reviews.user", "name");

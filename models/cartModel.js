@@ -42,6 +42,8 @@ const CartSchema = mongoose.Schema(
   },
   {
     timestamps: true, // Automatically adds `createdAt` and `updatedAt` fields
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
@@ -55,8 +57,29 @@ CartSchema.pre("save", function (next) {
     totalItems += item.quantity;
   });
 
+  // Set the calculated values in the model
   this.totalPrice = totalPrice;
   this.totalItems = totalItems;
+
+  next();
+});
+
+// Middleware to calculate totalPrice and totalItems before updating
+CartSchema.pre("findOneAndUpdate", function (next) {
+  const update = this.getUpdate(); // Get the update object
+  if (update.$set && update.$set.items) {
+    let totalPrice = 0;
+    let totalItems = 0;
+
+    update.$set.items.forEach((item) => {
+      totalPrice += item.quantity * item.price;
+      totalItems += item.quantity;
+    });
+
+    // Set the calculated values in the update object
+    update.$set.totalPrice = totalPrice;
+    update.$set.totalItems = totalItems;
+  }
   next();
 });
 
