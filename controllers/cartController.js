@@ -33,6 +33,29 @@ const addToCart = async (req, res, next) => {
     data: cart,
   });
 };
-const removeFromCart = async (req, res, next) => {};
+const removeFromCart = async (req, res, next) => {
+  const { productId } = req.body;
+  const userId = req.user.id;
+
+  if (!productId) {
+    throw new CustomError.BadRequestError("Please provide product ID");
+  }
+
+  const cart = await Cart.findOne({ user: userId });
+
+  if (!cart) {
+    throw new CustomError.NotFoundError("Cart not found");
+  }
+
+  cart.items = cart.items.filter((item) => item.product.toString() !== productId);
+
+  await cart.save();
+
+  res.status(StatusCodes.OK).json({
+    success: true,
+    message: "Product removed from cart successfully",
+    data: cart,
+  });
+};
 const updateCart = async (req, res, next) => {};
 module.exports = { addToCart, removeFromCart, updateCart };
