@@ -19,10 +19,11 @@ const server = http.createServer(app);
 const connectDB = require("./db/connectDB");
 
 // Route imports
-const authRoute = require("./routes/authRoute");
-const productRoute = require("./routes/productRoute");
-const userRoute = require("./routes/userRouter");
+const authRouter = require("./routes/authRoute");
+const productRouter = require("./routes/productRoute");
+const userRouter = require("./routes/userRouter");
 const cartRouter = require("./routes/cartRoute");
+const messageRouter = require("./routes/messagesRoute");
 
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
@@ -103,10 +104,11 @@ io.on("connection", (socket) => {
 });
 
 // Routes with rate limiting
-app.use("/api/auth", authLimiter, authRoute);
-app.use("/api/products", apiLimiter, productRoute);
-app.use("/api/users", apiLimiter, userRoute);
+app.use("/api/auth", authLimiter, authRouter);
+app.use("/api/products", apiLimiter, productRouter);
+app.use("/api/users", apiLimiter, userRouter);
 app.use("/api/carts", apiLimiter, cartRouter);
+app.use("/api/messages", apiLimiter, messageRouter);
 
 // Error handling middleware
 app.use(notFoundMiddleware);
