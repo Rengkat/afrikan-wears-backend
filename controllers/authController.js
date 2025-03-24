@@ -1,8 +1,11 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
 const Token = require("../models/tokenModel");
-const { attachTokenToResponse } = require("../utils");
+const { attachTokenToResponse, createUserPayload } = require("../utils");
 const sendResetPasswordEmail = require("../utils/email/sendResetPasswordEmail");
+const crypto = require("crypto");
+const sendVerificationEmail = require("../utils/Email/sendVerificationMail");
+const { StatusCodes } = require("http-status-codes");
 const register = async (req, res, next) => {
   try {
     const { name, email, password, company } = req.body;
@@ -17,7 +20,7 @@ const register = async (req, res, next) => {
     }
     // create verification token
     const verificationToken = crypto.randomBytes(40).toString("hex");
-    const expiration = new Date(new Date.now() + 1000 * 60 * 60);
+    const expiration = new Date(Date.now() + 1000 * 60 * 60);
     // create a user
     const user = await User.create({
       name,
@@ -31,7 +34,7 @@ const register = async (req, res, next) => {
     sendVerificationEmail({
       email: user.email,
       origin: process.env.ORIGIN,
-      name: user.firstName,
+      name: user.name,
       verificationToken,
     });
     res.status(StatusCodes.CREATED).json({
@@ -95,7 +98,7 @@ const login = async (req, res, next) => {
     }
 
     // Check if password is correct
-    const isPasswordCorrect = await user.comparePassword(password); // Await this
+    const isPasswordCorrect = await user.comparePassword(password);
     if (!isPasswordCorrect) {
       throw new CustomError.UnauthenticatedError("Password wrong! Please enter correct password");
     }

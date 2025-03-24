@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const TokenSchema = mongoose.Schema({
+const TokenSchema = new mongoose.Schema({
   refreshToken: { type: String },
   ip: { type: String },
   userAgent: { type: String },
