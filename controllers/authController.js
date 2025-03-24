@@ -140,7 +140,38 @@ const login = async (req, res, next) => {
     next(error);
   }
 };
-const logout = async (req, res, next) => {};
+const logout = async (req, res, next) => {
+  try {
+    const { refreshToken } = req.signedCookies;
+
+    res.clearCookie("accessToken", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      signed: true,
+    });
+
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      signed: true,
+    });
+
+    if (refreshToken) {
+      const token = await Token.findOne({ refreshToken });
+      if (token) {
+        token.isValid = false;
+        await token.save();
+      }
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "User logged out successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
