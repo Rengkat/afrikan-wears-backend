@@ -125,7 +125,7 @@ const login = async (req, res, next) => {
       refreshToken = crypto.randomBytes(40).toString("hex");
       const ip = req.ip;
       const userAgent = req.headers["user-agent"];
-      const refreshTokenPayload = { refreshToken, ip, userAgent, user: user._id }; // Include user ID
+      const refreshTokenPayload = { refreshToken, ip, userAgent, user: user._id };
       await Token.create(refreshTokenPayload);
     }
 

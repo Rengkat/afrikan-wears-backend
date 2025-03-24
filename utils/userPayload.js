@@ -1,6 +1,6 @@
 const createUserPayload = (user) => {
   return {
-    name: user.username,
+    name: user.name,
     role: user.role,
   };
 };

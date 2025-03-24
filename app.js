@@ -44,7 +44,7 @@ const apiLimiter = rateLimit({
 app.use(morgan("dev"));
 app.use(helmet());
 app.use(express.json());
-app.use(cookieParser());
+app.use(cookieParser(process.env.JWT_SECRET));
 app.use(expressFileUpload({ useTempFiles: true }));
 app.use(express.static("public"));
 
