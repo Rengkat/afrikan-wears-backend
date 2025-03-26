@@ -16,8 +16,9 @@ router
   .route("/")
   .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), addProduct)
   .get(getAllProducts);
+router.route("/upload-product-image").post(authenticateUser);
 router
-  .route("/productId")
+  .route(":/productId")
   .get(getDetailProduct)
   .patch(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), updateProduct)
   .delete(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), deleteProduct);

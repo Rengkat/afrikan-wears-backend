@@ -142,32 +142,17 @@ const login = async (req, res, next) => {
 };
 const logout = async (req, res, next) => {
   try {
-    const { refreshToken } = req.signedCookies;
-
-    res.clearCookie("accessToken", {
+    const userId = req.user.id;
+    await Token.findOneAndDelete({ user: userId });
+    res.cookie("accessToken", "", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      signed: true,
+      expires: new Date(0),
     });
-
-    res.clearCookie("refreshToken", {
+    res.cookie("refreshToken", "", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      signed: true,
+      expires: new Date(0),
     });
-
-    if (refreshToken) {
-      const token = await Token.findOne({ refreshToken });
-      if (token) {
-        token.isValid = false;
-        await token.save();
-      }
-    }
-
-    res.status(StatusCodes.OK).json({
-      success: true,
-      message: "User logged out successfully",
-    });
+    res.status(StatusCodes.OK).json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     next(error);
   }

@@ -107,4 +107,12 @@ const deleteProduct = async (req, res, next) => {
     next(error);
   }
 };
-module.exports = { addProduct, getAllProducts, getDetailProduct, updateProduct, deleteProduct };
+const uploadProductImage = async (req, res, next) => {};
+module.exports = {
+  addProduct,
+  getAllProducts,
+  getDetailProduct,
+  updateProduct,
+  deleteProduct,
+  uploadProductImage,
+};
