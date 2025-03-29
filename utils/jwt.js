@@ -19,9 +19,9 @@ const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
   // Attach refreshToken (long-lived, e.g., 100 days)
   res.cookie("refreshToken", refreshTokenJWT, {
     httpOnly: true,
-    expires: new Date(Date.now() + 100 * 24 * 60 * 60 * 1000), // 100 days
+    expires: new Date(Date.now() + 100 * 24 * 60 * 60 * 1000),
     signed: true,
-    secure: process.env.NODE_ENV === "production", // true in production
+    secure: process.env.NODE_ENV === "production",
   });
 };
 module.exports = { attachTokenToResponse, isTokenVerified };

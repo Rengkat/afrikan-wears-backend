@@ -144,16 +144,29 @@ const login = async (req, res, next) => {
 const logout = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    await Token.findOneAndDelete({ user: userId });
-    res.cookie("accessToken", "", {
+    if (!userId) {
+      throw new CustomError.UnauthenticatedError("Not authenticated");
+    }
+
+    // Invalidate the refresh token in the database
+    await Token.findOneAndUpdate({ user: userId }, { isValid: false }, { new: true });
+
+    res.cookie("accessToken", "logout", {
       httpOnly: true,
-      expires: new Date(0),
+      expires: new Date(Date.now()),
+      secure: process.env.NODE_ENV === "production",
     });
-    res.cookie("refreshToken", "", {
+
+    res.cookie("refreshToken", "logout", {
       httpOnly: true,
-      expires: new Date(0),
+      expires: new Date(Date.now()),
+      secure: process.env.NODE_ENV === "production",
     });
-    res.status(StatusCodes.OK).json({ success: true, message: "Logged out successfully" });
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Logged out successfully",
+    });
   } catch (error) {
     next(error);
   }

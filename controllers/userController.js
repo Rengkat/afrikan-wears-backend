@@ -3,6 +3,7 @@ const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
 
 const getAllUsers = async (req, res, next) => {
+  console.log(req.user);
   try {
     const users = await User.find({}).select("-password");
     res.status(StatusCodes.OK).json({ success: true, count: users.length, users });
