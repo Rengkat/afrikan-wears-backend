@@ -1,6 +1,6 @@
 const CustomError = require("../errors");
 const { isTokenVerified, attachTokenToResponse } = require("../utils");
-
+const Token = require("../models/tokenModel");
 const authenticateUser = async (req, res, next) => {
   let refreshToken;
   let accessToken;
@@ -21,6 +21,7 @@ const authenticateUser = async (req, res, next) => {
     user: payload.accessToken.id,
     refreshToken: payload.refreshToken,
   });
+
   if (!existingRefreshToken || !existingRefreshToken?.isValid) {
     throw new CustomError.UnauthenticatedError("Authentication invalid");
   }
@@ -30,27 +31,41 @@ const authenticateUser = async (req, res, next) => {
     refreshToken: existingRefreshToken.refreshToken,
   });
   req.user = payload.accessToken;
+  next();
 };
 const adminAuthorization = async (req, res, next) => {
-  if (req.user.role !== "admin") {
-    throw new CustomError.UnauthorizedError("Not authorized to access this route");
+  try {
+    if (req.user.role !== "admin") {
+      throw new CustomError.UnauthorizedError("Not authorized to access this route");
+      // res.status(401).json({ message: "Not authorized to access this route", success: false });
+    }
+    next();
+  } catch (error) {
+    next(error);
   }
-  next();
 };
 const stylistAuthorization = async (req, res, next) => {
-  if (req.user.role !== "stylist") {
-    throw new CustomError.UnauthorizedError(
-      "Not authorized to access this route. Only for stylist"
-    );
+  try {
+    if (req.user.role !== "stylist") {
+      throw new CustomError.UnauthorizedError(
+        "Not authorized to access this route. Only for stylist"
+      );
+    }
+    next();
+  } catch (error) {
+    next(error);
   }
-  next();
 };
 const adminAndStylistAuthorization = (...roles) => {
   return async (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return next(new CustomError.UnauthorizedError("You are not authorized!"));
+    try {
+      if (!roles.includes(req.user.role)) {
+        return next(new CustomError.UnauthorizedError("You are not authorized!"));
+      }
+      next();
+    } catch (error) {
+      next(error);
     }
-    next();
   };
 };
 module.exports = {

@@ -2,6 +2,7 @@ const Product = require("../models/productModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
 const generateSKU = require("../utils/skuGenerator");
+const { writeClient } = require("../utils");
 
 const addProduct = async (req, res, next) => {
   try {
@@ -107,7 +108,32 @@ const deleteProduct = async (req, res, next) => {
     next(error);
   }
 };
-const uploadProductImage = async (req, res, next) => {};
+
+const uploadProductImage = async (req, res, next) => {
+  try {
+    if (!req.files || !req.files.image) {
+      throw new CustomError.BadRequestError("No image file uploaded");
+    }
+
+    const imageFile = req.files.image;
+
+    // Upload the image to Sanity
+    const result = await writeClient.assets.upload("image", imageFile.data, {
+      filename: imageFile.name,
+      contentType: imageFile.mimetype,
+    });
+
+    // Construct the image URL
+    const imageUrl = `${result.url}?w=500&h=500&fit=crop`;
+    res.status(StatusCodes.OK).json({
+      success: true,
+      imageUrl,
+      message: "Image uploaded successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 module.exports = {
   addProduct,
   getAllProducts,

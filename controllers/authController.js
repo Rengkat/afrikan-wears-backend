@@ -22,11 +22,13 @@ const register = async (req, res, next) => {
     const verificationToken = crypto.randomBytes(40).toString("hex");
     const expiration = new Date(Date.now() + 1000 * 60 * 60);
     // create a user
+    const userCount = await User.countDocuments();
     const user = await User.create({
       name,
       email,
       password,
       company,
+      role: userCount === 0 ? "admin" : company ? "stylist" : "user",
       verificationToken,
       verificationTokenExpirationDate: expiration,
     });
@@ -111,7 +113,6 @@ const login = async (req, res, next) => {
     // Create access token
     const userPayload = createUserPayload(user);
     let refreshToken;
-
     // Check if refresh token exists
     const refreshTokenExist = await Token.findOne({ user: user._id });
 

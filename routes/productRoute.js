@@ -10,13 +10,16 @@ const {
   getDetailProduct,
   updateProduct,
   deleteProduct,
+  uploadProductImage,
 } = require("../controllers/productController");
 const router = express.Router();
 router
   .route("/")
   .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), addProduct)
   .get(getAllProducts);
-router.route("/upload-product-image").post(authenticateUser);
+router
+  .route("/upload-product-image")
+  .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), uploadProductImage);
 router
   .route(":/productId")
   .get(getDetailProduct)
