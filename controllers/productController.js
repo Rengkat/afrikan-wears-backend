@@ -3,7 +3,8 @@ const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
 const generateSKU = require("../utils/skuGenerator");
 const { writeClient } = require("../utils");
-
+const fs = require("fs").promises;
+const path = require("path");
 const addProduct = async (req, res, next) => {
   try {
     const { name, price, image, brand, category, description, stock, rating, featured } = req.body;
@@ -108,30 +109,54 @@ const deleteProduct = async (req, res, next) => {
     next(error);
   }
 };
-
 const uploadProductImage = async (req, res, next) => {
+  let tempFilePath = null;
+
   try {
-    if (!req.files || !req.files.image) {
+    if (!req.files?.image) {
       throw new CustomError.BadRequestError("No image file uploaded");
     }
 
     const imageFile = req.files.image;
+    tempFilePath = imageFile.tempFilePath;
+    const fileBuffer = await fs.readFile(tempFilePath);
 
-    // Upload the image to Sanity
-    const result = await writeClient.assets.upload("image", imageFile.data, {
+    // Upload the image asset
+    const uploadResult = await writeClient.assets.upload("image", fileBuffer, {
       filename: imageFile.name,
       contentType: imageFile.mimetype,
     });
 
-    // Construct the image URL
-    const imageUrl = `${result.url}?w=500&h=500&fit=crop`;
+    // Create an imageStorage document referencing the asset
+    const doc = await writeClient.create({
+      _type: "imageStorage",
+      image: {
+        _type: "image",
+        asset: {
+          _type: "reference",
+          _ref: uploadResult._id,
+        },
+      },
+    });
+
+    const imageUrl = `${uploadResult.url}?w=500&h=500&fit=crop`;
+
     res.status(StatusCodes.OK).json({
       success: true,
       imageUrl,
-      message: "Image uploaded successfully",
+      documentId: doc._id,
+      message: "Image uploaded and documented successfully",
     });
   } catch (error) {
     next(error);
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (e) {
+        console.error(e);
+      }
+    }
   }
 };
 module.exports = {
