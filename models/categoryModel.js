@@ -19,10 +19,6 @@ const CategorySchema = new mongoose.Schema(
       required: [true, "Provide category image URL"],
     },
 
-    featured: {
-      type: Boolean,
-      default: false,
-    },
     slug: {
       type: String,
       unique: true,
