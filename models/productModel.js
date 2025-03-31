@@ -14,23 +14,30 @@ const ProductSchema = new mongoose.Schema(
       min: [0, "Price cannot be negative"],
       set: (v) => Math.round(v * 100) / 100, // Round to 2 decimal places
     },
-    images: [
-      // Changed to array for multiple images
-      {
-        type: String,
-        required: [true, "Provide at least one image URL"],
+    mainImage: {
+      type: String,
+      required: [true, "Please provide product image URL"],
+      validate: {
+        validator: function (v) {
+          return /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(v);
+        },
+        message: (props) => `${props.value} is not a valid URL!`,
       },
-    ],
-    brand: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Brand",
-      required: [true, "Provide product brand"],
+    },
+    subImages: {
+      type: [String],
+      validate: {
+        validator: function (v) {
+          return v.every((url) => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(url));
+        },
+        message: (props) => `Invalid URL found in subImages!`,
+      },
     },
     sku: {
       type: String,
       required: [true, "Provide product SKU"],
       unique: true,
-      uppercase: true, // Ensure SKU is stored in uppercase
+      uppercase: true,
     },
     description: {
       type: String,
@@ -116,5 +123,10 @@ ProductSchema.virtual("averageRating").get(function () {
   const sum = this.reviews.reduce((acc, review) => acc + review.rating, 0);
   return sum / this.reviews.length;
 });
+ProductSchema.index({ price: 1 });
+ProductSchema.index({ rating: -1 });
+ProductSchema.index({ featured: 1 });
+ProductSchema.index({ brand: 1 });
+ProductSchema.index({ category: 1 });
 
 module.exports = mongoose.model("Product", ProductSchema);

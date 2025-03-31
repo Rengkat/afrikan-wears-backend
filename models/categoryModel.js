@@ -14,10 +14,6 @@ const CategorySchema = new mongoose.Schema(
       trim: true,
       maxlength: [200, "Description cannot exceed 200 characters"],
     },
-    image: {
-      type: String,
-      required: [true, "Provide category image URL"],
-    },
 
     slug: {
       type: String,

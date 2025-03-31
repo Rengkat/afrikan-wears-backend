@@ -24,6 +24,7 @@ const productRouter = require("./routes/productRoute");
 const userRouter = require("./routes/userRouter");
 const cartRouter = require("./routes/cartRoute");
 const messageRouter = require("./routes/messagesRoute");
+const categoryRouter = require("./routes/categoryRoute");
 
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
@@ -91,7 +92,7 @@ io.on("connection", (socket) => {
 
   socket.on("joinUser", (userId) => {
     socket.join(userId);
-    console.log(`User ${socket.id} joined their channel: ${userId}`);
+    console.log(`User ${socket.id} joined: ${userId}`);
   });
 
   socket.on("error", (error) => {
@@ -109,6 +110,7 @@ app.use("/api/products", apiLimiter, productRouter);
 app.use("/api/users", apiLimiter, userRouter);
 app.use("/api/carts", apiLimiter, cartRouter);
 app.use("/api/messages", apiLimiter, messageRouter);
+app.use("/api/categories", apiLimiter, categoryRouter);
 
 // Error handling middleware
 app.use(notFoundMiddleware);
