@@ -7,11 +7,24 @@ const fs = require("fs").promises;
 const path = require("path");
 const addProduct = async (req, res, next) => {
   try {
-    const { name, price, image, brand, category, description, stock, rating, featured } = req.body;
+    const {
+      name,
+      price,
+      mainImage,
+      subImages,
+      brand,
+      category,
+      description,
+      stock,
+      rating,
+      featured,
+      attributes,
+    } = req.body;
 
     // Generate a unique SKU
     const sku = generateSKU(brand, category, name);
 
+    // Check if SKU already exists
     const existingProduct = await Product.findOne({ sku });
     if (existingProduct) {
       throw new CustomError.BadRequestError("Product with this SKU already exists");
@@ -20,7 +33,8 @@ const addProduct = async (req, res, next) => {
     const product = await Product.create({
       name,
       price,
-      image,
+      mainImage,
+      subImages,
       brand,
       sku,
       category,
@@ -28,9 +42,14 @@ const addProduct = async (req, res, next) => {
       stock,
       rating,
       featured,
+      attributes,
     });
 
-    res.status(StatusCodes.CREATED).json({ success: true, product, message: "Product added" });
+    res.status(StatusCodes.CREATED).json({
+      success: true,
+      product,
+      message: "Product added successfully",
+    });
   } catch (error) {
     next(error);
   }
