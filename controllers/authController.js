@@ -8,30 +8,35 @@ const sendVerificationEmail = require("../utils/Email/sendVerificationMail");
 const { StatusCodes } = require("http-status-codes");
 const register = async (req, res, next) => {
   try {
-    const { name, email, password, company } = req.body;
+    const { name, email, password, companyName } = req.body;
+
     // check if details are present
     if (!name || !email || !password) {
       throw new CustomError.BadRequestError("Please provide all credentials");
     }
-    // check if the email exist
+
+    // check if the email exists
     const existedUser = await User.findOne({ email });
     if (existedUser) {
-      throw new CustomError.BadRequestError("Sorry, email already exist");
+      throw new CustomError.BadRequestError("Sorry, email already exists");
     }
+
     // create verification token
     const verificationToken = crypto.randomBytes(40).toString("hex");
     const expiration = new Date(Date.now() + 1000 * 60 * 60);
+
     // create a user
     const userCount = await User.countDocuments();
     const user = await User.create({
       name,
       email,
       password,
-      company,
-      role: userCount === 0 ? "admin" : company ? "stylist" : "user",
+      companyName,
+      role: userCount === 0 ? "admin" : "user",
       verificationToken,
       verificationTokenExpirationDate: expiration,
     });
+
     // send verification token email
     sendVerificationEmail({
       email: user.email,
@@ -39,9 +44,17 @@ const register = async (req, res, next) => {
       name: user.name,
       verificationToken,
     });
+
     res.status(StatusCodes.CREATED).json({
       message: "Account created successfully. Kindly verify your email",
       success: true,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        company: user.company || null,
+      },
     });
   } catch (error) {
     next(error);

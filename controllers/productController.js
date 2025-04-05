@@ -57,12 +57,17 @@ const addProduct = async (req, res, next) => {
 const getAllProducts = async (req, res, next) => {
   try {
     const products = await Product.find({})
-      .select("name, price, image, rating")
-      .populate("brand", "name")
-      .populate("category", "name")
-      .populate("reviews.user", "name");
+      .select("name price mainImage rating")
+      .populate("category", "name");
 
-    res.status(StatusCodes.OK).json({ success: true, count: products.length, products });
+    if (!products) {
+      throw new CustomError.NotFoundError("No products found");
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      products,
+    });
   } catch (error) {
     next(error);
   }

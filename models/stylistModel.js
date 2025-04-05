@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const CategorySchema = new mongoose.Schema(
+const StylistSchema = new mongoose.Schema(
   {
     name: {
       type: String,
@@ -21,6 +21,17 @@ const CategorySchema = new mongoose.Schema(
       lowercase: true,
       index: true,
     },
+    location: {
+      state: {
+        type: String,
+      },
+      lga: {
+        type: String,
+      },
+      address: {
+        type: String,
+      },
+    },
   },
   {
     timestamps: true,
@@ -30,11 +41,11 @@ const CategorySchema = new mongoose.Schema(
 );
 
 // Auto-generate slug before saving
-CategorySchema.pre("save", function (next) {
+StylistSchema.pre("save", function (next) {
   if (!this.slug) {
     this.slug = this.name.toLowerCase().replace(/\s+/g, "-");
   }
   next();
 });
 
-module.exports = mongoose.model("Category", CategorySchema);
+module.exports = mongoose.model("Stylist", StylistSchema);

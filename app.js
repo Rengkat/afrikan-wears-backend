@@ -24,7 +24,7 @@ const productRouter = require("./routes/productRoute");
 const userRouter = require("./routes/userRouter");
 const cartRouter = require("./routes/cartRoute");
 const messageRouter = require("./routes/messagesRoute");
-const categoryRouter = require("./routes/categoryRoute");
+const stylistRouter = require("./routes/stylistRoute");
 
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
@@ -110,7 +110,7 @@ app.use("/api/products", apiLimiter, productRouter);
 app.use("/api/users", apiLimiter, userRouter);
 app.use("/api/carts", apiLimiter, cartRouter);
 app.use("/api/messages", apiLimiter, messageRouter);
-app.use("/api/categories", apiLimiter, categoryRouter);
+app.use("/api/stylists", apiLimiter, messageRouter);
 
 // Error handling middleware
 app.use(notFoundMiddleware);

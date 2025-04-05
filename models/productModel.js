@@ -46,9 +46,14 @@ const ProductSchema = new mongoose.Schema(
       maxlength: [1000, "Description cannot exceed 1000 characters"],
     },
     category: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      type: String,
+      enum: ["all", "men corporate", "women corporate", "men native", "female native"],
       required: [true, "Provide product category"],
+    },
+    stylist: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Stylist",
+      required: true,
     },
     stock: {
       type: Number,
