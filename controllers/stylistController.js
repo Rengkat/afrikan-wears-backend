@@ -11,7 +11,7 @@ const addStylist = async (req, res, next) => {
     }
 
     const existingStylist = await Stylist.findOne({ name });
-    if (existingCategory) {
+    if (existingStylist) {
       throw new CustomError.BadRequestError("Category name already exists");
     }
 
@@ -31,7 +31,7 @@ const addStylist = async (req, res, next) => {
 
 const getAllStylists = async (req, res, next) => {
   try {
-    const { name, sort } = req.query;
+    const { name } = req.query;
     const query = {};
 
     if (name) {
@@ -41,23 +41,12 @@ const getAllStylists = async (req, res, next) => {
       };
     }
 
-    const sortOptions = {
-      name: "name",
-      newest: "-createdAt",
-      oldest: "createdAt",
-    };
-    const sortKey = sortOptions[sort] || "name";
-
-    const stylists = await Stylist.find(query).sort(sortKey).lean();
+    const stylists = await Stylist.find(query).lean();
 
     res.status(StatusCodes.OK).json({
       success: true,
       count: categories.length,
       stylists,
-      filters: {
-        name: name || null,
-        sort: sort || "name (default)",
-      },
     });
   } catch (error) {
     next(error);
@@ -86,14 +75,14 @@ const updateStylist = async (req, res, next) => {
 
     const stylist = await Stylist.findById(id);
     if (!stylist) {
-      throw new CustomError.NotFoundError(`No category found with id: ${id}`);
+      throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
 
     // Check if new name conflicts
 
     const nameExists = await Stylist.findOne({ name });
     if (nameExists) {
-      throw new CustomError.BadRequestError("Category name already exists");
+      throw new CustomError.BadRequestError("Stylist name already exists");
     }
 
     stylist.name = name || stylist.name;
@@ -117,17 +106,17 @@ const deleteStylist = async (req, res, next) => {
     // Check if Stylist has products
     const productsCount = await Product.countDocuments({ stylist: id });
     if (productsCount > 0) {
-      throw new CustomError.BadRequestError("Cannot delete category with associated products");
+      throw new CustomError.BadRequestError("Cannot delete stylist with associated products");
     }
 
     const stylist = await Stylist.findByIdAndDelete(id);
     if (!stylist) {
-      throw new CustomError.NotFoundError(`No category found with id: ${id}`);
+      throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
 
     res.status(StatusCodes.OK).json({
       success: true,
-      message: "Category deleted successfully",
+      message: "Stylist deleted successfully",
     });
   } catch (error) {
     next(error);

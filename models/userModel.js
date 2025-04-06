@@ -51,7 +51,7 @@ const UserSchema = new mongoose.Schema({
   },
   addresses: {
     type: [AddressSchema],
-    default: [],
+    default: [String],
   },
   isVerified: { type: Boolean, default: false },
   verificationToken: { type: String },

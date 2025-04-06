@@ -110,7 +110,7 @@ app.use("/api/products", apiLimiter, productRouter);
 app.use("/api/users", apiLimiter, userRouter);
 app.use("/api/carts", apiLimiter, cartRouter);
 app.use("/api/messages", apiLimiter, messageRouter);
-app.use("/api/stylists", apiLimiter, messageRouter);
+app.use("/api/stylists", apiLimiter, stylistRouter);
 
 // Error handling middleware
 app.use(notFoundMiddleware);

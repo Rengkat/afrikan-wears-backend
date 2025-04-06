@@ -1,7 +1,11 @@
 const express = require("express");
 const router = express.Router();
 // const {} = require("../controllers/brandController");
-const { authenticateUser, adminAuthorization } = require("../middleware/authentication");
+const {
+  authenticateUser,
+  adminAuthorization,
+  adminAndStylistAuthorization,
+} = require("../middleware/authentication");
 const {
   getAllStylists,
   addStylist,
@@ -14,7 +18,7 @@ router.route("/").get(getAllStylists).post(authenticateUser, adminAuthorization,
 router
   .route("/:id")
   .get(getSingleStylist)
-  .patch(authenticateUser, adminAuthorization, updateStylist)
+  .patch(authenticateUser, adminAndStylistAuthorization, updateStylist)
   .delete(deleteStylist);
 
 module.exports = router;

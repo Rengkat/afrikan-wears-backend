@@ -14,7 +14,7 @@ const StylistSchema = new mongoose.Schema(
       trim: true,
       maxlength: [200, "Description cannot exceed 200 characters"],
     },
-
+    owner: { type: mongoose.Types.ObjectId, ref: "User" },
     slug: {
       type: String,
       unique: true,
