@@ -39,7 +39,7 @@ const addToCart = async (req, res, next) => {
 };
 const getAllCartProducts = async (req, res, next) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user.id;
     const cart = await Cart.findOne({ user: userId }).populate({
       path: "items.product",
       select: "name price image",
@@ -104,7 +104,7 @@ const removeFromCart = async (req, res, next) => {
 const updateCart = async (req, res, next) => {
   try {
     const { productId, quantity } = req.body;
-    const userId = req.user.userId;
+    const userId = req.user.id;
 
     if (!productId || !quantity) {
       throw new CustomError.BadRequestError("Please provide product ID and quantity");
