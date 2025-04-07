@@ -1,6 +1,7 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
 const Token = require("../models/tokenModel");
+const Stylist = require("../models/stylistModel");
 const { attachTokenToResponse, createUserPayload } = require("../utils");
 const sendResetPasswordEmail = require("../utils/email/sendResetPasswordEmail");
 const crypto = require("crypto");
@@ -27,15 +28,31 @@ const register = async (req, res, next) => {
 
     // create a user
     const userCount = await User.countDocuments();
+    let company = null;
+
+    // If companyName is provided, create the stylist first
+    if (companyName) {
+      company = await Stylist.create({
+        name: companyName,
+        description: `${name}'s styling company`,
+      });
+    }
+
     const user = await User.create({
       name,
       email,
       password,
-      companyName,
-      role: userCount === 0 ? "admin" : "user",
+      company: company?._id || null,
+      role: userCount === 0 ? "admin" : companyName ? "stylist" : "user",
       verificationToken,
       verificationTokenExpirationDate: expiration,
     });
+
+    // If company was created, update it with the owner reference
+    if (company) {
+      company.owner = user._id;
+      await company.save();
+    }
 
     // send verification token email
     sendVerificationEmail({
@@ -53,7 +70,7 @@ const register = async (req, res, next) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        company: user.company || null,
+        company: company || null,
       },
     });
   } catch (error) {
