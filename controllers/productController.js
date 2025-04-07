@@ -12,7 +12,7 @@ const addProduct = async (req, res, next) => {
       price,
       mainImage,
       subImages,
-      brand,
+      stylist,
       category,
       description,
       stock,
@@ -22,7 +22,7 @@ const addProduct = async (req, res, next) => {
     } = req.body;
 
     // Generate a unique SKU
-    const sku = generateSKU(brand, category, name);
+    const sku = generateSKU(category, name);
 
     // Check if SKU already exists
     const existingProduct = await Product.findOne({ sku });
@@ -35,7 +35,7 @@ const addProduct = async (req, res, next) => {
       price,
       mainImage,
       subImages,
-      brand,
+      stylist,
       sku,
       category,
       description,

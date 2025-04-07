@@ -1,11 +1,16 @@
-const generateSKU = (brand, category, name) => {
-  const brandCode = brand.slice(0, 3).toUpperCase();
-  const categoryCode = category.slice(0, 3).toUpperCase();
+const generateSKU = (category, name) => {
+  const categoryCode = category
+    .split(" ")
+    .map((word) => word.slice(0, 3))
+    .slice(0, 2)
+    .join("-")
+    .toUpperCase();
   const nameCode = name.slice(0, 3).toUpperCase();
 
   const randomNumber = Math.floor(1000 + Math.random() * 9000);
 
-  const sku = `${brandCode}-${categoryCode}-${nameCode}-${randomNumber}`;
+  const sku = `${categoryCode}-${nameCode}-${randomNumber}`;
+  console.log(sku);
   return sku;
 };
 
