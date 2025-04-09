@@ -101,7 +101,6 @@ const getDetailProduct = async (req, res, next) => {
 
     const product = await Product.findById(id)
       .populate("stylist", "name")
-      .populate("category", "name")
       .populate("reviews.user", "name");
     if (!product) {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
@@ -206,6 +205,45 @@ const uploadProductImage = async (req, res, next) => {
     }
   }
 };
+const addReview = async (req, res, next) => {
+  try {
+    const { productId } = req.params;
+    const { comment, rating } = req.body;
+    const userId = req.user.id;
+
+    if (!rating || rating < 0 || rating > 5) {
+      throw new CustomError.BadRequestError("Rating must be between 0 and 5");
+    }
+
+    const product = await Product.findById(productId);
+    if (!product) {
+      throw new CustomError.NotFoundError("Product not found");
+    }
+
+    const existingReview = product.reviews.find(
+      (review) => review.user.toString() === userId.toString()
+    );
+    if (existingReview) {
+      throw new CustomError.BadRequestError("You already reviewed this product");
+    }
+
+    product.reviews.push({
+      user: userId,
+      rating,
+      comment: comment || "",
+    });
+
+    await product.save();
+
+    res.status(StatusCodes.CREATED).json({
+      success: true,
+      data: product,
+      averageRating: product.averageRating,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 module.exports = {
   addProduct,
   getAllProducts,
@@ -213,4 +251,5 @@ module.exports = {
   updateProduct,
   deleteProduct,
   uploadProductImage,
+  addReview,
 };
