@@ -12,6 +12,7 @@ const {
   deleteProduct,
   uploadProductImage,
   addReview,
+  updateReview,
 } = require("../controllers/productController");
 const router = express.Router();
 router
@@ -27,4 +28,5 @@ router
   .patch(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), updateProduct)
   .delete(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), deleteProduct);
 router.route("/:productId/review").post(authenticateUser, addReview);
+router.route("/:productId/review/:reviewId").post(authenticateUser, updateReview);
 module.exports = router;

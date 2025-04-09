@@ -244,6 +244,52 @@ const addReview = async (req, res, next) => {
     next(error);
   }
 };
+const updateReview = async (req, res, next) => {
+  try {
+    const { productId, reviewId } = req.params;
+    const { comment, rating } = req.body;
+    const userId = req.user.id;
+
+    // Validate input
+    if (rating && (rating < 0 || rating > 5)) {
+      throw new CustomError.BadRequestError("Rating must be between 0 and 5");
+    }
+
+    // Find the product
+    const product = await Product.findById(productId);
+    if (!product) {
+      throw new CustomError.NotFoundError("Product not found");
+    }
+
+    // Find the review and check ownership
+    const reviewIndex = product.reviews.findIndex(
+      (review) => review._id.toString() === reviewId && review.user.toString() === userId.toString()
+    );
+
+    if (reviewIndex === -1) {
+      throw new CustomError.NotFoundError("Review not found or unauthorized");
+    }
+
+    // Update the review (atomic operation)
+    const updatedFields = {};
+    if (rating !== undefined) updatedFields["reviews.$.rating"] = rating;
+    if (comment !== undefined) updatedFields["reviews.$.comment"] = comment;
+
+    const updatedProduct = await Product.findOneAndUpdate(
+      { _id: productId, "reviews._id": reviewId },
+      { $set: updatedFields },
+      { new: true, runValidators: true }
+    );
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      data: updatedProduct,
+      averageRating: updatedProduct.averageRating,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 module.exports = {
   addProduct,
   getAllProducts,
@@ -252,4 +298,5 @@ module.exports = {
   deleteProduct,
   uploadProductImage,
   addReview,
+  updateReview,
 };
