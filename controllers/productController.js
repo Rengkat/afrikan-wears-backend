@@ -56,16 +56,39 @@ const addProduct = async (req, res, next) => {
 };
 const getAllProducts = async (req, res, next) => {
   try {
-    const products = await Product.find({})
-      .select("name price mainImage rating")
-      .populate("category", "name");
+    const { stylist, page = 1, name, limit = 10, category } = req.query;
 
-    if (!products) {
+    // Base query
+    const query = {};
+
+    // Apply filters if provided
+    if (stylist) query.stylist = stylist;
+    if (name) query.name = { $regex: name, $options: "i" };
+    if (category) query.category = category;
+
+    // Pagination
+    const skip = (page - 1) * limit;
+
+    const products = await Product.find(query)
+      .select("name price mainImage rating category")
+      .populate("stylist", "name")
+      .skip(skip)
+      .limit(limit)
+      .lean(); // Convert to plain JS objects (better performance)
+
+    if (!products || products.length === 0) {
       throw new CustomError.NotFoundError("No products found");
     }
 
+    // Get total count for pagination metadata
+    const totalProducts = await Product.countDocuments(query);
+
     res.status(StatusCodes.OK).json({
       success: true,
+      count: products.length,
+      total: totalProducts,
+      page: Number(page),
+      pages: Math.ceil(totalProducts / limit),
       products,
     });
   } catch (error) {
@@ -77,7 +100,7 @@ const getDetailProduct = async (req, res, next) => {
     const { productId: id } = req.params;
 
     const product = await Product.findById(id)
-      .populate("brand", "name")
+      .populate("stylist", "name")
       .populate("category", "name")
       .populate("reviews.user", "name");
     if (!product) {

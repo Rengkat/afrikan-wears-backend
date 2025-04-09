@@ -67,30 +67,17 @@ const ProductSchema = new mongoose.Schema(
       max: [5, "Rating cannot be more than 5"],
       set: (v) => Math.round(v * 10) / 10, // Round to 1 decimal place
     },
-    reviews: [
-      {
-        user: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "User",
-          required: true,
+    reviews: {
+      type: [
+        {
+          user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+          rating: { type: Number, required: true, min: 0, max: 5 },
+          comment: { type: String, trim: true, maxlength: 500 },
+          createdAt: { type: Date, default: Date.now },
         },
-        rating: {
-          type: Number,
-          required: true,
-          min: 0,
-          max: 5,
-        },
-        comment: {
-          type: String,
-          trim: true,
-          maxlength: 500,
-        },
-        createdAt: {
-          type: Date,
-          default: Date.now,
-        },
-      },
-    ],
+      ],
+      default: [],
+    },
     featured: {
       type: Boolean,
       default: false,
@@ -124,9 +111,9 @@ ProductSchema.pre("save", function (next) {
 
 // Virtual for average rating (calculated on-the-fly)
 ProductSchema.virtual("averageRating").get(function () {
-  if (this.reviews.length === 0) return 0;
+  if (!this.reviews || this.reviews.length === 0) return 0; // Handle undefined/null
   const sum = this.reviews.reduce((acc, review) => acc + review.rating, 0);
-  return sum / this.reviews.length;
+  return Math.round((sum / this.reviews.length) * 10) / 10; // Round to 1 decimal
 });
 ProductSchema.index({ price: 1 });
 ProductSchema.index({ rating: -1 });
