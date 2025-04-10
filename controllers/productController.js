@@ -74,7 +74,7 @@ const getAllProducts = async (req, res, next) => {
       .populate("stylist", "name")
       .skip(skip)
       .limit(limit)
-      .lean(); // Convert to plain JS objects (better performance)
+      .lean();
 
     if (!products || products.length === 0) {
       throw new CustomError.NotFoundError("No products found");

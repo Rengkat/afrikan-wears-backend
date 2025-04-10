@@ -60,18 +60,25 @@ const addStylist = async (req, res, next) => {
 };
 const getAllStylists = async (req, res, next) => {
   try {
-    const { name } = req.query;
+    const { name, page = 1, limit = 10 } = req.query;
     const query = {};
 
     if (name) {
       query.name = { $regex: name, $options: "i" };
     }
 
-    const stylists = await Stylist.find(query).lean();
+    const skip = (page - 1) * limit;
+    const [stylists, total] = await Promise.all([
+      Stylist.find(query).skip(skip).limit(limit).lean(),
+      Stylist.countDocuments(query),
+    ]);
 
     res.status(StatusCodes.OK).json({
       success: true,
       count: stylists.length,
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / limit),
       stylists,
     });
   } catch (error) {
