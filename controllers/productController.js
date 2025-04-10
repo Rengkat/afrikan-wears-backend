@@ -5,7 +5,12 @@ const generateSKU = require("../utils/skuGenerator");
 const { writeClient } = require("../utils");
 const fs = require("fs").promises;
 const path = require("path");
+const mongoose = require("mongoose");
+
 const addProduct = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const {
       name,
@@ -21,140 +26,214 @@ const addProduct = async (req, res, next) => {
       attributes,
     } = req.body;
 
+    if (!name || !price || !category || !stylist || !mongoose.Types.ObjectId.isValid(stylist)) {
+      throw new CustomError.BadRequestError("Provide valid name, price, category and stylist ID");
+    }
+
     // Generate a unique SKU
     const sku = generateSKU(category, name);
 
     // Check if SKU already exists
-    const existingProduct = await Product.findOne({ sku });
+    const existingProduct = await Product.findOne({ sku }).session(session);
     if (existingProduct) {
       throw new CustomError.BadRequestError("Product with this SKU already exists");
     }
 
-    const product = await Product.create({
-      name,
-      price,
-      mainImage,
-      subImages,
-      stylist,
-      sku,
-      category,
-      description,
-      stock,
-      rating,
-      featured,
-      attributes,
-    });
+    const product = await Product.create(
+      [
+        {
+          name,
+          price,
+          mainImage,
+          subImages,
+          stylist,
+          sku,
+          category,
+          description,
+          stock,
+          rating,
+          featured,
+          attributes,
+        },
+      ],
+      { session }
+    );
 
+    await session.commitTransaction();
     res.status(StatusCodes.CREATED).json({
       success: true,
-      product,
+      product: product[0],
       message: "Product added successfully",
     });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
+
 const getAllProducts = async (req, res, next) => {
   try {
-    const { stylist, page = 1, name, limit = 10, category } = req.query;
-
-    // Base query
+    const { stylist, page = 1, name, limit = 10, category, featured } = req.query;
     const query = {};
 
     // Apply filters if provided
-    if (stylist) query.stylist = stylist;
+    if (stylist) {
+      if (!mongoose.Types.ObjectId.isValid(stylist)) {
+        throw new CustomError.BadRequestError("Invalid stylist ID");
+      }
+      query.stylist = stylist;
+    }
     if (name) query.name = { $regex: name, $options: "i" };
     if (category) query.category = category;
+    if (featured) query.featured = featured === "true";
 
     // Pagination
     const skip = (page - 1) * limit;
 
-    const products = await Product.find(query)
-      .select("name price mainImage rating category")
-      .populate("stylist", "name")
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    if (!products || products.length === 0) {
-      throw new CustomError.NotFoundError("No products found");
-    }
-
-    // Get total count for pagination metadata
-    const totalProducts = await Product.countDocuments(query);
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .select("name price mainImage rating category featured")
+        .populate("stylist", "name")
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(query),
+    ]);
 
     res.status(StatusCodes.OK).json({
       success: true,
       count: products.length,
-      total: totalProducts,
+      total,
       page: Number(page),
-      pages: Math.ceil(totalProducts / limit),
+      pages: Math.ceil(total / limit),
       products,
     });
   } catch (error) {
     next(error);
   }
 };
+
 const getDetailProduct = async (req, res, next) => {
   try {
     const { productId: id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new CustomError.BadRequestError("Invalid product ID");
+    }
+
     const product = await Product.findById(id)
-      .populate("stylist", "name")
-      .populate("reviews.user", "name");
+      .populate("stylist", "name location")
+      .populate("reviews.user", "name avatar");
+
     if (!product) {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
     }
 
-    res.status(StatusCodes.OK).json({ success: true, product });
+    res.status(StatusCodes.OK).json({
+      success: true,
+      product,
+    });
   } catch (error) {
     next(error);
   }
 };
+
 const updateProduct = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { productId: id } = req.params;
-    const { name, price, image, brand, sku, description, category, stock, rating, featured } =
-      req.body;
+    const updateData = req.body;
 
-    const product = await Product.findById(id);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new CustomError.BadRequestError("Invalid product ID");
+    }
+
+    const product = await Product.findById(id).session(session);
     if (!product) {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
     }
 
-    product.name = name || product.name;
-    product.price = price || product.price;
-    product.image = image || product.image;
-    product.brand = brand || product.brand;
-    product.sku = sku || product.sku;
-    product.description = description || product.description;
-    product.category = category || product.category;
-    product.stock = stock || product.stock;
-    product.rating = rating || product.rating;
-    product.featured = featured || product.featured;
+    // Prevent SKU updates
+    if (updateData.sku && updateData.sku !== product.sku) {
+      throw new CustomError.BadRequestError("SKU cannot be changed");
+    }
 
-    await product.save();
+    // Update fields
+    const allowedUpdates = [
+      "name",
+      "price",
+      "mainImage",
+      "subImages",
+      "description",
+      "category",
+      "stock",
+      "rating",
+      "featured",
+      "attributes",
+    ];
 
-    res.status(StatusCodes.OK).json({ success: true, product, message: "product updated" });
+    allowedUpdates.forEach((field) => {
+      if (updateData[field] !== undefined) {
+        product[field] = updateData[field];
+      }
+    });
+
+    await product.save({ session });
+    await session.commitTransaction();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      product,
+      message: "Product updated successfully",
+    });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
+
 const deleteProduct = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { productId: id } = req.params;
 
-    const product = await Product.findByIdAndDelete(id);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new CustomError.BadRequestError("Invalid product ID");
+    }
 
+    // Check if product has any reviews
+    const product = await Product.findById(id).session(session);
     if (!product) {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
     }
 
-    res.status(StatusCodes.OK).json({ success: true, message: "Product deleted successfully" });
+    if (product.reviews.length > 0) {
+      throw new CustomError.BadRequestError("Cannot delete product with reviews");
+    }
+
+    await Product.findByIdAndDelete(id).session(session);
+    await session.commitTransaction();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Product deleted successfully",
+    });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
+
 const uploadProductImage = async (req, res, next) => {
   let tempFilePath = null;
 
@@ -200,22 +279,30 @@ const uploadProductImage = async (req, res, next) => {
       try {
         await fs.unlink(tempFilePath);
       } catch (e) {
-        console.error(e);
+        console.error("Error deleting temp file:", e);
       }
     }
   }
 };
+
 const addReview = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { productId } = req.params;
     const { comment, rating } = req.body;
     const userId = req.user.id;
 
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      throw new CustomError.BadRequestError("Invalid product ID");
+    }
+
     if (!rating || rating < 0 || rating > 5) {
       throw new CustomError.BadRequestError("Rating must be between 0 and 5");
     }
 
-    const product = await Product.findById(productId);
+    const product = await Product.findById(productId).session(session);
     if (!product) {
       throw new CustomError.NotFoundError("Product not found");
     }
@@ -233,7 +320,8 @@ const addReview = async (req, res, next) => {
       comment: comment || "",
     });
 
-    await product.save();
+    await product.save({ session });
+    await session.commitTransaction();
 
     res.status(StatusCodes.CREATED).json({
       success: true,
@@ -241,27 +329,35 @@ const addReview = async (req, res, next) => {
       averageRating: product.averageRating,
     });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
+
 const updateReview = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { productId, reviewId } = req.params;
     const { comment, rating } = req.body;
     const userId = req.user.id;
 
-    // Validate input
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      throw new CustomError.BadRequestError("Invalid product ID");
+    }
+
     if (rating && (rating < 0 || rating > 5)) {
       throw new CustomError.BadRequestError("Rating must be between 0 and 5");
     }
 
-    // Find the product
-    const product = await Product.findById(productId);
+    const product = await Product.findById(productId).session(session);
     if (!product) {
       throw new CustomError.NotFoundError("Product not found");
     }
 
-    // Find the review and check ownership
     const reviewIndex = product.reviews.findIndex(
       (review) => review._id.toString() === reviewId && review.user.toString() === userId.toString()
     );
@@ -270,26 +366,26 @@ const updateReview = async (req, res, next) => {
       throw new CustomError.NotFoundError("Review not found or unauthorized");
     }
 
-    // Update the review (atomic operation)
-    const updatedFields = {};
-    if (rating !== undefined) updatedFields["reviews.$.rating"] = rating;
-    if (comment !== undefined) updatedFields["reviews.$.comment"] = comment;
+    // Update the review
+    if (rating !== undefined) product.reviews[reviewIndex].rating = rating;
+    if (comment !== undefined) product.reviews[reviewIndex].comment = comment;
 
-    const updatedProduct = await Product.findOneAndUpdate(
-      { _id: productId, "reviews._id": reviewId },
-      { $set: updatedFields },
-      { new: true, runValidators: true }
-    );
+    await product.save({ session });
+    await session.commitTransaction();
 
     res.status(StatusCodes.OK).json({
       success: true,
-      data: updatedProduct,
-      averageRating: updatedProduct.averageRating,
+      data: product,
+      averageRating: product.averageRating,
     });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
+
 module.exports = {
   addProduct,
   getAllProducts,
