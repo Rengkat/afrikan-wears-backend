@@ -66,24 +66,7 @@ UserSchema.pre("save", async function () {
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });
-// UserSchema.post("save", async function (doc, next) {
-//   try {
-//     if (doc.companyName && !doc.company) {
-//       const stylist = await Stylist.create({
-//         name: doc.companyName,
-//         description: `${doc.name}'s styling company`,
-//         owner: doc._id,
-//       });
 
-//       doc.company = stylist._id;
-//       doc.role = "stylist";
-//       await doc.save();
-//     }
-//     next();
-//   } catch (error) {
-//     next(error);
-//   }
-// });
 UserSchema.methods.comparePassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

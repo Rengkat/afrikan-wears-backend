@@ -1,94 +1,91 @@
 const Stylist = require("../models/stylistModel");
+const User = require("../models/userModel");
 const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
-
+const mongoose = require("mongoose");
 const addStylist = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const { name, description } = req.body;
+    const { name, description, owner, location } = req.body;
 
-    if (!name) {
-      throw new CustomError.BadRequestError("Name and image are required");
+    if (!name || !owner || !mongoose.Types.ObjectId.isValid(owner)) {
+      throw new CustomError.BadRequestError("Provide valid name and owner ID");
     }
 
-    const existingStylist = await Stylist.findOne({ name });
+    // Check if stylist exists (case-insensitive)
+    const existingStylist = await Stylist.findOne({
+      name: { $regex: new RegExp(`^${name}$`, "i") },
+    }).session(session);
+
     if (existingStylist) {
-      throw new CustomError.BadRequestError("Category name already exists");
+      throw new CustomError.BadRequestError("Stylist name already exists");
     }
 
-    const stylist = await Stylist.create({
-      name,
-      description,
-    });
+    // Create stylist
+    const stylist = await Stylist.create(
+      [
+        {
+          name,
+          description,
+          owner,
+          location,
+        },
+      ],
+      { session }
+    );
 
+    // Update user role
+    const user = await User.findById(owner).session(session);
+    if (!user) {
+      throw new CustomError.NotFoundError("User not found");
+    }
+
+    user.role = "stylist";
+    user.company = stylist[0]._id;
+    await user.save({ session });
+
+    await session.commitTransaction();
     res.status(StatusCodes.CREATED).json({
       success: true,
-      stylist,
+      stylist: stylist[0],
     });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
-
 const getAllStylists = async (req, res, next) => {
   try {
     const { name } = req.query;
     const query = {};
 
     if (name) {
-      query.name = {
-        $regex: name,
-        $options: "i",
-      };
+      query.name = { $regex: name, $options: "i" };
     }
 
     const stylists = await Stylist.find(query).lean();
 
     res.status(StatusCodes.OK).json({
       success: true,
-      count: categories.length,
+      count: stylists.length,
       stylists,
     });
   } catch (error) {
     next(error);
   }
 };
-
 const getSingleStylist = async (req, res, next) => {
-  const { id } = req.params;
-
-  const stylist = await Stylist.findById(id);
-
-  if (!stylist) {
-    throw new CustomError.NotFoundError(`No category found with id: ${id}`);
-  }
-
-  res.status(StatusCodes.OK).json({
-    success: true,
-    stylist,
-  });
-};
-
-const updateStylist = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, description } = req.body;
+    const stylist = await Stylist.findById(id).lean();
 
-    const stylist = await Stylist.findById(id);
     if (!stylist) {
       throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
-
-    // Check if new name conflicts
-
-    const nameExists = await Stylist.findOne({ name });
-    if (nameExists) {
-      throw new CustomError.BadRequestError("Stylist name already exists");
-    }
-
-    stylist.name = name || stylist.name;
-    stylist.description = description || stylist.description;
-
-    await stylist.save();
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -98,28 +95,84 @@ const updateStylist = async (req, res, next) => {
     next(error);
   }
 };
+const updateStylist = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
+  try {
+    const { id } = req.params;
+    const { name, description, location } = req.body;
+
+    const stylist = await Stylist.findById(id).session(session);
+    if (!stylist) {
+      throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
+    }
+
+    // Case-insensitive name conflict check (excluding current stylist)
+    if (name) {
+      const nameExists = await Stylist.findOne({
+        name: { $regex: new RegExp(`^${name}$`, "i") },
+        _id: { $ne: id },
+      }).session(session);
+
+      if (nameExists) {
+        throw new CustomError.BadRequestError("Stylist name already exists");
+      }
+      stylist.name = name;
+    }
+
+    if (description) stylist.description = description;
+    if (location) stylist.location = location;
+
+    await stylist.save({ session });
+    await session.commitTransaction();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      stylist,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
 const deleteStylist = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { id } = req.params;
 
     // Check if Stylist has products
-    const productsCount = await Product.countDocuments({ stylist: id });
+    const productsCount = await Product.countDocuments({ stylist: id }).session(session);
     if (productsCount > 0) {
       throw new CustomError.BadRequestError("Cannot delete stylist with associated products");
     }
 
-    const stylist = await Stylist.findByIdAndDelete(id);
+    // Check if any User still references this Stylist
+    const usersCount = await User.countDocuments({ company: id }).session(session);
+    if (usersCount > 0) {
+      throw new CustomError.BadRequestError("Cannot delete stylist with associated users");
+    }
+
+    const stylist = await Stylist.findByIdAndDelete(id).session(session);
     if (!stylist) {
       throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
+
+    await session.commitTransaction();
 
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Stylist deleted successfully",
     });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
 
