@@ -108,7 +108,7 @@ io.on("connection", (socket) => {
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/products", apiLimiter, productRouter);
 app.use("/api/users", apiLimiter, userRouter);
-app.use("/api/carts", apiLimiter, cartRouter);
+app.use("/api/cart", apiLimiter, cartRouter);
 app.use("/api/messages", apiLimiter, messageRouter);
 app.use("/api/stylists", apiLimiter, stylistRouter);
 

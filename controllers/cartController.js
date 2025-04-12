@@ -1,4 +1,5 @@
 const Cart = require("../models/cartModel");
+const Product = require("../models/productModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
 const mongoose = require("mongoose");
@@ -8,23 +9,29 @@ const addToCart = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const { productId, quantity, price } = req.body;
+    const { productId, quantity } = req.body;
     const userId = req.user.id;
 
     if (!productId || !quantity || !price) {
       throw new CustomError.BadRequestError("Please provide product ID, quantity, and price");
     }
-
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
+    const product = await Product.findById(productId).session(session);
+    if (!product) {
+      throw new CustomError.NotFoundError("Product not found");
+    }
 
+    if (product.stock < quantity) {
+      throw new CustomError.BadRequestError(`Only ${product.stock} items available`);
+    }
     if (quantity <= 0) {
       throw new CustomError.BadRequestError("Quantity must be greater than 0");
     }
 
     let cart = await Cart.findOne({ user: userId }).session(session);
-
+    const price = product.price;
     if (!cart) {
       cart = await Cart.create(
         [
@@ -160,8 +167,11 @@ const updateCart = async (req, res, next) => {
       throw new CustomError.BadRequestError("Quantity must be greater than 0");
     }
 
-    const cart = await Cart.findOne({ user: userId }).session(session);
-
+    const cart = await Cart.findById({ user: userId }).session(session);
+    const product = await Product.findById(productId).session(session);
+    if (product.stock < quantity) {
+      throw new CustomError.BadRequestError(`Only ${product.stock} items available`);
+    }
     if (!cart) {
       throw new CustomError.NotFoundError("Cart not found");
     }
