@@ -33,11 +33,19 @@ const authenticateUser = async (req, res, next) => {
   req.user = payload.accessToken;
   next();
 };
+const restrictToUser = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      throw new CustomError.UnauthorizedError("Only customers can perform this action");
+    }
+    next();
+  };
+};
+
 const adminAuthorization = async (req, res, next) => {
   try {
     if (req.user.role !== "admin") {
       throw new CustomError.UnauthorizedError("Not authorized to access this route");
-      // res.status(401).json({ message: "Not authorized to access this route", success: false });
     }
     next();
   } catch (error) {
@@ -73,4 +81,5 @@ module.exports = {
   adminAuthorization,
   stylistAuthorization,
   adminAndStylistAuthorization,
+  restrictToUser,
 };

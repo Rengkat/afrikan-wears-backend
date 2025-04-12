@@ -3,35 +3,41 @@ const Product = require("../models/productModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
 const mongoose = require("mongoose");
-
 const addToCart = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { productId, quantity } = req.body;
+    const { productId, quantity } = req.body; // Removed price from destructuring
     const userId = req.user.id;
 
-    if (!productId || !quantity || !price) {
-      throw new CustomError.BadRequestError("Please provide product ID, quantity, and price");
+    if (!productId || !quantity) {
+      // Removed price check here
+      throw new CustomError.BadRequestError("Please provide product ID and quantity");
     }
+
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
+    onlyUsers(req.user);
     const product = await Product.findById(productId).session(session);
     if (!product) {
       throw new CustomError.NotFoundError("Product not found");
     }
 
+    // Now we can safely access product.price
+    const price = product.price;
+
     if (product.stock < quantity) {
       throw new CustomError.BadRequestError(`Only ${product.stock} items available`);
     }
+
     if (quantity <= 0) {
       throw new CustomError.BadRequestError("Quantity must be greater than 0");
     }
 
     let cart = await Cart.findOne({ user: userId }).session(session);
-    const price = product.price;
+
     if (!cart) {
       cart = await Cart.create(
         [
