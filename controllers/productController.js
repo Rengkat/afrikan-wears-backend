@@ -6,6 +6,7 @@ const { writeClient } = require("../utils");
 const fs = require("fs").promises;
 const path = require("path");
 const mongoose = require("mongoose");
+const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
 
 const addProduct = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -77,7 +78,6 @@ const getAllProducts = async (req, res, next) => {
   try {
     const { stylist, page = 1, name, limit = 10, category, featured } = req.query;
     const query = {};
-
     // Apply filters if provided
     if (stylist) {
       if (!mongoose.Types.ObjectId.isValid(stylist)) {

@@ -1,6 +1,7 @@
 // Load .env
 require("dotenv").config();
 const { Server } = require("socket.io");
+const { connectRedis } = require("./utils/redisClient");
 const http = require("http");
 
 // Express and middleware
@@ -137,6 +138,7 @@ const start = async () => {
   try {
     validateEnvVariables();
     await connectDB(process.env.MONGO_URI);
+    await connectRedis();
     server.listen(port, () => console.log(`Server running on port ${port}...`));
   } catch (error) {
     console.error("Server startup failed:", error.message);

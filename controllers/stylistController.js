@@ -1,6 +1,8 @@
 const Stylist = require("../models/stylistModel");
 const User = require("../models/userModel");
 const { StatusCodes } = require("http-status-codes");
+const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
+
 const CustomError = require("../errors");
 const mongoose = require("mongoose");
 const addStylist = async (req, res, next) => {

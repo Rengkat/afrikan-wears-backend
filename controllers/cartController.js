@@ -2,6 +2,8 @@ const Cart = require("../models/cartModel");
 const Product = require("../models/productModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
+const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
+
 const mongoose = require("mongoose");
 const addToCart = async (req, res, next) => {
   const session = await mongoose.startSession();
