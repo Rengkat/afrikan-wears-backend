@@ -364,7 +364,8 @@ const addReview = async (req, res, next) => {
 
     await product.save({ session });
     await session.commitTransaction();
-
+    // Clear the product cache as reviews affect the product data
+    await clearCache(`product:${productId}`);
     res.status(StatusCodes.CREATED).json({
       success: true,
       data: product,
@@ -414,7 +415,8 @@ const updateReview = async (req, res, next) => {
 
     await product.save({ session });
     await session.commitTransaction();
-
+    // Clear the product cache as reviews affect the product data
+    await clearCache(`product:${productId}`);
     res.status(StatusCodes.OK).json({
       success: true,
       data: product,
