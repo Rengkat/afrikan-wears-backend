@@ -32,7 +32,7 @@ const connectRedis = async () => {
     await client.connect();
   } catch (error) {
     console.error("Redis connection failed:", error);
-    throw new CustomError.ServiceUnavailableError("Cache service unavailable");
+    throw new CustomError.BadRequestError("Cache service unavailable");
   }
 };
 

@@ -10,7 +10,7 @@ const addToCart = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const { productId, quantity } = req.body; // Removed price from destructuring
+    const { productId, quantity } = req.body;
     const userId = req.user.id;
 
     if (!productId || !quantity) {

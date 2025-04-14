@@ -61,6 +61,8 @@ const addProduct = async (req, res, next) => {
     );
 
     await session.commitTransaction();
+    // Clear products cache as we've added a new product
+    await clearCache("products:*");
     res.status(StatusCodes.CREATED).json({
       success: true,
       product: product[0],
@@ -73,10 +75,25 @@ const addProduct = async (req, res, next) => {
     session.endSession();
   }
 };
-
 const getAllProducts = async (req, res, next) => {
   try {
     const { stylist, page = 1, name, limit = 10, category, featured } = req.query;
+
+    // Create a unique cache key based on the query parameters
+    const cacheKey = `products:${stylist || "all"}:${page}:${limit}:${name || ""}:${
+      category || ""
+    }:${featured || ""}`;
+
+    // Try to get data from cache first
+    const cachedData = await getFromCache(cacheKey);
+    if (cachedData) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        ...cachedData,
+      });
+    }
+
     const query = {};
     // Apply filters if provided
     if (stylist) {
@@ -102,13 +119,21 @@ const getAllProducts = async (req, res, next) => {
       Product.countDocuments(query),
     ]);
 
-    res.status(StatusCodes.OK).json({
-      success: true,
+    const responseData = {
       count: products.length,
       total,
       page: Number(page),
       pages: Math.ceil(total / limit),
       products,
+    };
+
+    // Cache the response for 1 hour (3600 seconds)
+    await setInCache(cacheKey, responseData);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      fromCache: false,
+      ...responseData,
     });
   } catch (error) {
     next(error);
@@ -123,6 +148,18 @@ const getDetailProduct = async (req, res, next) => {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
 
+    const cacheKey = `product:${id}`;
+
+    // Try to get data from cache first
+    const cachedProduct = await getFromCache(cacheKey);
+    if (cachedProduct) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        product: cachedProduct,
+      });
+    }
+
     const product = await Product.findById(id)
       .populate("stylist", "name location")
       .populate("reviews.user", "name avatar");
@@ -131,15 +168,18 @@ const getDetailProduct = async (req, res, next) => {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
     }
 
+    // Cache the product for 1 hour (3600 seconds)
+    await setInCache(cacheKey, product.toObject());
+
     res.status(StatusCodes.OK).json({
       success: true,
+      fromCache: false,
       product,
     });
   } catch (error) {
     next(error);
   }
 };
-
 const updateProduct = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -184,7 +224,8 @@ const updateProduct = async (req, res, next) => {
 
     await product.save({ session });
     await session.commitTransaction();
-
+    // Clear both the specific product cache and the products list cache
+    await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
     res.status(StatusCodes.OK).json({
       success: true,
       product,
@@ -221,7 +262,8 @@ const deleteProduct = async (req, res, next) => {
 
     await Product.findByIdAndDelete(id).session(session);
     await session.commitTransaction();
-
+    // Clear both the specific product cache and the products list cache
+    await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Product deleted successfully",
