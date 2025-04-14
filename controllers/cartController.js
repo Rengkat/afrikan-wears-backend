@@ -63,6 +63,7 @@ const addToCart = async (req, res, next) => {
     }
 
     await session.commitTransaction();
+    await clearCache(`cart:${userId}`);
     res.status(StatusCodes.CREATED).json({
       success: true,
       message: "Product added to cart successfully",
@@ -79,37 +80,49 @@ const addToCart = async (req, res, next) => {
 const getAllCartProducts = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    const cacheKey = `cart:${userId}`;
+
+    // Try cache first
+    const cachedCart = await getFromCache(cacheKey);
+    if (cachedCart) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        message: "Cart retrieved from cache",
+        data: cachedCart,
+      });
+    }
+
+    // Cache miss → fetch from DB
     const cart = await Cart.findOne({ user: userId }).populate({
       path: "items.product",
       select: "name price mainImage stock",
     });
 
+    let responseData;
     if (!cart) {
-      return res.status(StatusCodes.OK).json({
-        success: true,
-        message: "Your cart is empty",
-        data: { items: [], total: 0 },
-      });
+      responseData = { items: [], total: 0 };
+    } else {
+      const total = cart.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      responseData = {
+        items: cart.items,
+        total: parseFloat(total.toFixed(2)),
+      };
     }
 
-    // Calculate total price
-    const total = cart.items.reduce((sum, item) => {
-      return sum + item.price * item.quantity;
-    }, 0);
+    // Cache the result
+    await setInCache(cacheKey, responseData);
 
     res.status(StatusCodes.OK).json({
       success: true,
-      message: "Cart products retrieved successfully",
-      data: {
-        items: cart.items,
-        total: parseFloat(total.toFixed(2)),
-      },
+      fromCache: false,
+      message: "Cart retrieved from database",
+      data: responseData,
     });
   } catch (error) {
     next(error);
   }
 };
-
 const removeFromCart = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -141,6 +154,8 @@ const removeFromCart = async (req, res, next) => {
 
     await cart.save({ session });
     await session.commitTransaction();
+    // Clear the user's cart cache
+    await clearCache(`cart:${userId}`);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -193,7 +208,8 @@ const updateCart = async (req, res, next) => {
     cart.items[itemIndex].quantity = quantity;
     await cart.save({ session });
     await session.commitTransaction();
-
+    // Clear the user's cart cache
+    await clearCache(`cart:${userId}`);
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Cart updated successfully",
@@ -224,6 +240,8 @@ const clearCart = async (req, res, next) => {
     }
 
     await session.commitTransaction();
+    // Clear the user's cart cache
+    await clearCache(`cart:${userId}`);
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Cart cleared successfully",
