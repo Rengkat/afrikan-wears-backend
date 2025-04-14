@@ -49,6 +49,8 @@ const addStylist = async (req, res, next) => {
     await user.save({ session });
 
     await session.commitTransaction();
+    //clear stylist cache as a new stylist is added
+    await clearCache("stylist:*");
     res.status(StatusCodes.CREATED).json({
       success: true,
       stylist: stylist[0],
@@ -63,25 +65,39 @@ const addStylist = async (req, res, next) => {
 const getAllStylists = async (req, res, next) => {
   try {
     const { name, page = 1, limit = 10 } = req.query;
+    const cacheKey = `stylist:${name || ""}:${page}:${limit}`;
+    //get from cache first
+    const cachedData = await getFromCache(cacheKey);
+    if (cachedData) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        ...cachedData,
+      });
+    }
     const query = {};
 
     if (name) {
       query.name = { $regex: name, $options: "i" };
     }
-
     const skip = (page - 1) * limit;
     const [stylists, total] = await Promise.all([
       Stylist.find(query).skip(skip).limit(limit).lean(),
       Stylist.countDocuments(query),
     ]);
-
-    res.status(StatusCodes.OK).json({
-      success: true,
+    const responseData = {
       count: stylists.length,
       total,
       page: Number(page),
       pages: Math.ceil(total / limit),
       stylists,
+    };
+    //Cache the response for 1 hour
+    await setInCache(cacheKey, responseData);
+    res.status(StatusCodes.OK).json({
+      success: true,
+      fromCache: false,
+      ...responseData,
     });
   } catch (error) {
     next(error);
@@ -90,12 +106,24 @@ const getAllStylists = async (req, res, next) => {
 const getSingleStylist = async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    const cacheKey = `stylist:${id}`;
+    //get from cache first
+    const cachedStylist = await getFromCache(cacheKey);
+    if (cacheKey) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        stylist: cachedStylist,
+      });
+    }
     const stylist = await Stylist.findById(id).lean();
 
     if (!stylist) {
       throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
-
+    //add to cache
+    await setInCache(cacheKey, stylist.toOject());
     res.status(StatusCodes.OK).json({
       success: true,
       stylist,
@@ -135,10 +163,12 @@ const updateStylist = async (req, res, next) => {
 
     await stylist.save({ session });
     await session.commitTransaction();
-
+    // clear both the specific stylist cache and the stylist cache
+    await Promise.all([clearCache(`stylist${id}`), clearCache(`stylist:*`)]);
     res.status(StatusCodes.OK).json({
       success: true,
       stylist,
+      message: "Updated successfully",
     });
   } catch (error) {
     await session.abortTransaction();
@@ -172,6 +202,8 @@ const deleteStylist = async (req, res, next) => {
     }
 
     await session.commitTransaction();
+    // clear both the specific stylist cache and the stylist cache
+    await Promise.all([clearCache(`stylist${id}`), clearCache(`stylist:*`)]);
 
     res.status(StatusCodes.OK).json({
       success: true,
