@@ -171,7 +171,26 @@ const login = async (req, res, next) => {
     next(error);
   }
 };
+const googleAuth = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      throw new CustomError.UnauthenticatedError("Google authentication failed");
+    }
 
+    const { refreshToken, ...userPayload } = req.user;
+
+    // Attach tokens to response
+    attachTokenToResponse({ res, userPayload, refreshToken });
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      user: userPayload,
+      message: "Logged in successfully with Google",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 const logout = async (req, res, next) => {
   try {
     const userId = req.user.id;
