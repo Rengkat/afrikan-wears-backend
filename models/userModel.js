@@ -49,6 +49,11 @@ const UserSchema = new mongoose.Schema({
     ref: "Stylist",
     default: null,
   },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true,
+  },
   addresses: {
     type: [AddressSchema],
     default: [],

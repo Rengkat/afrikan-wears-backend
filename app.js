@@ -1,5 +1,6 @@
 // Load .env
 require("dotenv").config();
+require("./utils/googleOauth");
 const { Server } = require("socket.io");
 const { connectRedis } = require("./utils/redisClient");
 const http = require("http");
@@ -12,7 +13,8 @@ const expressFileUpload = require("express-fileupload");
 const morgan = require("morgan");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-
+const passport = require("passport");
+const session = require("express-session");
 const app = express();
 const server = http.createServer(app);
 
@@ -56,7 +58,10 @@ app.get("/", (req, res) => {
 });
 
 // CORS setup
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:3000"];
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
+  "http://localhost:3000",
+  "https://accounts.google.com",
+];
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -104,6 +109,24 @@ io.on("connection", (socket) => {
     console.log("A user disconnected:", socket.id);
   });
 });
+
+// Session configuration
+app.use(
+  session({
+    secret: process.env.JWT_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+    },
+  })
+);
+
+// Initialize passport
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Routes with rate limiting
 app.use("/api/auth", authLimiter, authRouter);

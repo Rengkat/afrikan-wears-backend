@@ -278,6 +278,7 @@ module.exports = {
   register,
   verifyEmail,
   login,
+  googleAuth,
   logout,
   forgotPassword,
   resetPassword,
