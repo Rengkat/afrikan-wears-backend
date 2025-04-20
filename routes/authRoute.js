@@ -5,6 +5,7 @@ const {
   logout,
   forgotPassword,
   resetPassword,
+  googleAuth,
 } = require("../controllers/authController");
 const passport = require("passport");
 const express = require("express");
