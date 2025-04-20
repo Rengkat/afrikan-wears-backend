@@ -1,6 +1,6 @@
 # Stage 1: Build
-FROM node:18-alpine AS builder
-WORKDIR /usr/src/app
+FROM node:20-alpine AS builder
+WORKDIR /app
 
 # Copy package files first for better caching
 COPY package*.json ./
@@ -17,15 +17,15 @@ USER appuser
 
 # Stage 2: Runtime
 FROM node:18-alpine
-WORKDIR /usr/src/app
+WORKDIR /app
 
 # Create the same non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Copy only what's needed from builder
-COPY --from=builder --chown=appuser:appgroup /usr/src/app/node_modules ./node_modules
-COPY --from=builder --chown=appuser:appgroup /usr/src/app/package*.json ./
-COPY --from=builder --chown=appuser:appgroup /usr/src/app ./
+COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:appgroup /app/package*.json ./
+COPY --from=builder --chown=appuser:appgroup /app ./
 
 # Environment variables
 ENV NODE_ENV=production
