@@ -35,7 +35,7 @@ const paymentInfoSchema = new Schema(
   {
     paymentMethod: {
       type: String,
-      enum: ["credit_card", "paypal", "bank_transfer", "cash_on_delivery"],
+      enum: ["credit_card", "bank_transfer", "cash_on_delivery"],
       required: true,
     },
     paymentStatus: {
@@ -52,29 +52,15 @@ const paymentInfoSchema = new Schema(
   },
   { _id: false }
 );
-
+// 08063506987
 const shippingAddressSchema = new Schema(
   {
-    street: {
-      type: String,
-      required: true,
-    },
-    city: {
-      type: String,
-      required: true,
-    },
-    state: {
-      type: String,
-      required: true,
-    },
-    country: {
-      type: String,
-      required: true,
-    },
-    postalCode: {
-      type: String,
-      required: true,
-    },
+    country: { type: String, required: true },
+    state: { type: String, required: true },
+    city: { type: String, required: true },
+    street: { type: String, required: true },
+    postalCode: { type: String, required: true },
+    homeAddress: { type: String, required: true },
     phone: {
       type: String,
       required: true,

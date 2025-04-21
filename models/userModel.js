@@ -6,8 +6,14 @@ const AddressSchema = new mongoose.Schema({
   country: { type: String, required: true },
   state: { type: String, required: true },
   city: { type: String, required: true },
-  town: { type: String },
-  landmark: { type: String },
+  street: {
+    type: String,
+    required: true,
+  },
+  postalCode: {
+    type: String,
+    required: true,
+  },
   homeAddress: { type: String, required: true },
 });
 const UserSchema = new mongoose.Schema({

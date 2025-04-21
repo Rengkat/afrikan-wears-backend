@@ -50,6 +50,11 @@ const ProductSchema = new mongoose.Schema(
       enum: ["all", "men corporate", "women corporate", "men native", "female native"],
       required: [true, "Provide product category"],
     },
+    size: {
+      type: String,
+      enum: ["normal", "xl", "xxl"],
+      default: "normal",
+    },
     stylist: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Stylist",
