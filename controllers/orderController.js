@@ -244,6 +244,35 @@ const getSingleOrder = async (req, res, next) => {
     next(error);
   }
 };
+const getAllOrder = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const cacheKey = `orders:page:${page}:limit:${limit}`;
+    const cachedOrders = await getFromCache(cacheKey);
+    if (cachedOrders) {
+      res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        orders: cachedOrders,
+      });
+    }
+    const orders = await Order.find({})
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate("orderItems.product", "name mainImage");
+    await setInCache(cacheKey, orders);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      count: orders.length,
+      orders,
+      fromCache: false,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 const getMyOrders = async (req, res, next) => {
   try {
@@ -428,6 +457,7 @@ module.exports = {
   verifyPayment,
   getSingleOrder,
   getMyOrders,
+  getAllOrders,
   getStylistOrders,
   updateOrderStatus,
   updateOrderItemStatus,
