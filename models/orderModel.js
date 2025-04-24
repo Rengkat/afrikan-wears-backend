@@ -44,6 +44,7 @@ const paymentInfoSchema = new Schema(
       default: "pending",
     },
     transactionId: String,
+    reference: String,
     amountPaid: {
       type: Number,
       required: true,
