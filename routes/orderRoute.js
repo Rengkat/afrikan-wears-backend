@@ -1,5 +1,10 @@
 const express = require("express");
-const { createOrder, getMyOrders, getAllOrders } = require("../controllers/orderController");
+const {
+  createOrder,
+  getMyOrders,
+  getAllOrders,
+  completeCustomOrderPayment,
+} = require("../controllers/orderController");
 const {
   authenticateUser,
   adminAuthorization,
@@ -12,7 +17,7 @@ router
   .route("/")
   .post(authenticateUser, restrictToUser("user"), createOrder)
   .get(authenticateUser, adminAuthorization, getAllOrders);
-
+router.post("/balance-payment/:orderId", authenticateUser, completeCustomOrderPayment);
 router.post("/verify-payment/:orderId", authenticateUser, getMyOrders);
 // router.get("/me", authenticateUser, getMyOrders);
 

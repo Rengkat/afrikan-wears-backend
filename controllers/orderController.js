@@ -562,5 +562,6 @@ module.exports = {
   getAllOrders,
   getStylistOrders,
   updateOrderStatus,
+  completeCustomOrderPayment,
   updateOrderItemStatus,
 };

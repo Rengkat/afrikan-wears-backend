@@ -160,7 +160,19 @@ const orderSchema = new Schema(
     toObject: { virtuals: true },
   }
 );
-
+orderSchema.virtual("isCustomOrder").get(function () {
+  return this.orderItems.some((item) => item.orderType === "custom");
+});
+orderSchema.virtual("paidPercentage").get(function () {
+  if (this.paymentInfo.paymentStatus === "completed") return 100;
+  if (this.paymentInfo.paymentStatus === "partially_paid") {
+    return Math.round((this.paymentInfo.amountPaid / this.totalPrice) * 100);
+  }
+  return 0;
+});
+orderSchema.virtual("awaitingBalancePayment").get(function () {
+  return this.paymentInfo.balanceDue > 0 && this.paymentInfo.paymentStatus === "partially_paid";
+});
 // Calculate total price before saving
 orderSchema.pre("save", async function (next) {
   if (this.isModified("orderItems")) {
@@ -169,6 +181,13 @@ orderSchema.pre("save", async function (next) {
       0
     );
     this.totalPrice = this.itemsPrice + this.taxPrice + this.shippingPrice;
+
+    // For custom orders, set initial payment (60%)
+    if (this.orderItems.some((item) => item.orderType === "custom")) {
+      this.paymentInfo.amountPaid = this.totalPrice * 0.6;
+      this.paymentInfo.balanceDue = this.totalPrice * 0.4;
+      this.paymentInfo.paymentStatus = "partially_paid";
+    }
   }
   next();
 });
