@@ -26,7 +26,14 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      - name: Install docker-compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install docker-compose-plugin -y
+          # Check if installation was successful
+          docker compose version || docker-compose version
+
       - name: Build and push
         run: |
-          docker-compose -f docker-compose.yml build
-          docker-compose -f docker-compose.yml push
+          docker compose -f docker-compose.yml build 
+          docker compose -f docker-compose.yml push
