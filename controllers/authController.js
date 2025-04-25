@@ -7,6 +7,7 @@ const sendResetPasswordEmail = require("../utils/email/sendResetPasswordEmail");
 const crypto = require("crypto");
 const sendVerificationEmail = require("../utils/Email/sendVerificationMail");
 const { StatusCodes } = require("http-status-codes");
+const { clearCache } = require("../utils/redisClient");
 const register = async (req, res, next) => {
   try {
     const { name, email, password, companyName } = req.body;
@@ -106,6 +107,8 @@ const verifyEmail = async (req, res, next) => {
     user.verificationTokenExpirationDate = null;
     await user.save();
     //return res
+    const cacheKey = `users*`;
+    await clearCache(cacheKey);
     res.status(StatusCodes.OK).json({
       message: "Email verification successful.",
       success: true,

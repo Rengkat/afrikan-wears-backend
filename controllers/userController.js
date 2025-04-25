@@ -60,7 +60,11 @@ const getAllUsers = async (req, res, next) => {
 const getDetailUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-
+    const cacheKey = `users:${id}`;
+    const cachedData = getFromCache(cacheKey);
+    if (cachedData) {
+      res.status(StatusCodes.OK).json({ fromCache: true, success: true, user: cachedData });
+    }
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw new CustomError.BadRequestError("Invalid user ID format");
     }
@@ -72,15 +76,15 @@ const getDetailUser = async (req, res, next) => {
     if (!user) {
       throw new CustomError.NotFoundError(`User with ID ${id} not found`);
     }
-
-    res.status(StatusCodes.OK).json({ success: true, user });
+    await setInCache(cacheKey, user.toObject());
+    res.status(StatusCodes.OK).json({ success: true, user, fromCache: false });
   } catch (error) {
     next(error);
   }
 };
 const getMyProfile = async (req, res, next) => {
   try {
-    const userId = req.user.id; // Extracted from authenticated token
+    const userId = req.user.id;
 
     // Validate user ID format
     if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -173,6 +177,7 @@ const updateCurrentUser = async (req, res, next) => {
 
     const userResponse = user.toObject();
     delete userResponse.verificationTokenExpirationDate;
+    await Promise.all([clearCache(`users:${id}`), clearCache(`users:*`)]);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -239,6 +244,7 @@ const updateUser = async (req, res, next) => {
 
     const userResponse = user.toObject();
     delete userResponse.verificationTokenExpirationDate;
+    await Promise.all([clearCache(`users:${id}`), clearCache(`users:*`)]);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -268,6 +274,8 @@ const deleteUser = async (req, res, next) => {
     }
 
     await session.commitTransaction();
+    await Promise.all([clearCache(`users:${id}`), clearCache(`users:*`)]);
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: "User deleted successfully",

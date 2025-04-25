@@ -164,7 +164,7 @@ const updateStylist = async (req, res, next) => {
     await stylist.save({ session });
     await session.commitTransaction();
     // clear both the specific stylist cache and the stylist cache
-    await Promise.all([clearCache(`stylist${id}`), clearCache(`stylist:*`)]);
+    await Promise.all([clearCache(`stylist:${id}`), clearCache(`stylist:*`)]);
     res.status(StatusCodes.OK).json({
       success: true,
       stylist,
