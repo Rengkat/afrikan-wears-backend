@@ -12,7 +12,7 @@ const createOrder = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const { shippingAddress, paymentMethod } = req.body;
+    const { shippingAddress, paymentMethod, orderType, measurements, materialSample } = req.body;
     const userId = req.user.id;
 
     // Validate input
@@ -26,7 +26,7 @@ const createOrder = async (req, res, next) => {
       throw new CustomError.BadRequestError("No items in cart");
     }
 
-    // Prepare order items (without modifying stock yet)
+    // Prepare order items
     const orderItems = await Promise.all(
       cart.items.map(async (item) => {
         const product = await Product.findById(item.product).session(session);
@@ -34,19 +34,35 @@ const createOrder = async (req, res, next) => {
           throw new CustomError.NotFoundError(`Product not found: ${item.product}`);
         }
 
-        // Check stock availability
-        if (product.stock < item.quantity) {
+        // For standard orders, check stock availability
+        if (orderType === "standard" && product.stock < item.quantity) {
           throw new CustomError.BadRequestError(
             `Insufficient stock for ${product.name}. Only ${product.stock} available`
           );
         }
 
-        return {
+        const orderItem = {
           product: item.product,
           quantity: item.quantity,
           priceAtPurchase: product.price,
           stylist: product.stylist,
+          orderType,
         };
+
+        // Add custom order details if it's a custom order
+        if (orderType === "custom") {
+          if (!measurements) {
+            throw new CustomError.BadRequestError("Measurements are required for custom orders");
+          }
+
+          orderItem.measurements = measurements;
+          orderItem.materialSample = materialSample;
+          orderItem.paymentPlan = "partial";
+          orderItem.amountPaid = product.price * item.quantity * 0.6;
+          orderItem.balanceDue = product.price * item.quantity * 0.4;
+        }
+
+        return orderItem;
       })
     );
 
@@ -59,7 +75,11 @@ const createOrder = async (req, res, next) => {
     const shippingPrice = 15;
     const totalPrice = itemsPrice + taxPrice + shippingPrice;
 
-    // Create order with pending payment status
+    // For custom orders, calculate initial payment (60%)
+    const initialPayment = orderType === "custom" ? totalPrice * 0.6 : totalPrice;
+    const balanceDue = orderType === "custom" ? totalPrice * 0.4 : 0;
+
+    // Create order with appropriate payment status
     const order = await Order.create(
       [
         {
@@ -68,8 +88,9 @@ const createOrder = async (req, res, next) => {
           shippingAddress,
           paymentInfo: {
             paymentMethod,
-            paymentStatus: "pending",
-            amountPaid: totalPrice,
+            paymentStatus: orderType === "custom" ? "partially_paid" : "pending",
+            amountPaid: orderType === "custom" ? initialPayment : 0,
+            balanceDue,
           },
           itemsPrice,
           taxPrice,
@@ -84,12 +105,13 @@ const createOrder = async (req, res, next) => {
     // Initialize Paystack payment
     const paystackResponse = await paystack.transaction.initialize({
       email: req.user.email,
-      amount: Math.round(totalPrice * 100), // Paystack expects amount in kobo
+      amount: Math.round(initialPayment * 100), // Paystack expects amount in kobo
       reference: `order_${order[0]._id}_${Date.now()}`,
       callback_url: `${process.env.ORIGIN}/api/v1/orders/verify-payment?orderId=${order[0]._id}`,
       metadata: {
         order_id: order[0]._id.toString(),
         customer_id: userId.toString(),
+        order_type: orderType,
       },
     });
 
@@ -100,6 +122,17 @@ const createOrder = async (req, res, next) => {
     // Update order with payment reference
     order[0].paymentInfo.transactionId = paystackResponse.data.reference;
     await order[0].save({ session });
+
+    // For standard orders, reduce stock immediately
+    if (orderType === "standard") {
+      await Promise.all(
+        order[0].orderItems.map(async (item) => {
+          const product = await Product.findById(item.product).session(session);
+          product.stock -= item.quantity;
+          await product.save({ session });
+        })
+      );
+    }
 
     await session.commitTransaction();
 
@@ -116,6 +149,75 @@ const createOrder = async (req, res, next) => {
   }
 };
 
+// Add a new controller for final payment
+const completeCustomOrderPayment = async (req, res, next) => {
+  const { orderId } = req.params;
+  const { reference } = req.body;
+
+  if (!orderId || !reference) {
+    throw new CustomError.BadRequestError("Order ID and payment reference are required");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Verify payment with Paystack
+    const paymentResponse = await paystack.transaction.verify(reference);
+
+    if (!paymentResponse.status) {
+      throw new CustomError.BadRequestError("Payment verification failed");
+    }
+
+    const order = await Order.findById(orderId).session(session);
+    if (!order) {
+      throw new CustomError.NotFoundError(`Order not found: ${orderId}`);
+    }
+
+    // Check if order is a custom order
+    const isCustomOrder = order.orderItems.some((item) => item.orderType === "custom");
+    if (!isCustomOrder) {
+      throw new CustomError.BadRequestError("This is not a custom order");
+    }
+
+    // Check if payment was successful
+    if (paymentResponse.data.status !== "success") {
+      throw new CustomError.BadRequestError("Payment failed");
+    }
+
+    // Check if amount paid matches the balance due
+    const amountPaid = paymentResponse.data.amount / 100;
+    if (amountPaid < order.paymentInfo.balanceDue) {
+      throw new CustomError.BadRequestError("Amount paid is less than the balance due");
+    }
+
+    // Update payment info
+    order.paymentInfo.amountPaid += amountPaid;
+    order.paymentInfo.balanceDue = 0;
+    order.paymentInfo.paymentStatus = "completed";
+    order.paymentInfo.paymentDate = new Date();
+
+    await order.save({ session });
+    await session.commitTransaction();
+
+    // Clear relevant caches
+    await clearCache(`user:${order.customer}:orders*`);
+    await Promise.all(
+      order.orderItems.map((item) => clearCache(`stylist:${item.stylist}:orders*`))
+    );
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Final payment completed successfully",
+      order,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
 const verifyPayment = async (req, res, next) => {
   const { orderId } = req.query;
   const { reference } = req.body;
