@@ -5,6 +5,7 @@ const {
   updateCurrentUser,
   updateUser,
   deleteUser,
+  getMyProfile,
 } = require("../controllers/userController");
 const {
   authenticateUser,
@@ -16,7 +17,7 @@ const router = express.Router();
 
 router.route("/").get(authenticateUser, adminAuthorization, getAllUsers);
 
-router.route("/me").get(authenticateUser, getDetailUser).patch(authenticateUser, updateCurrentUser);
+router.route("/me").get(authenticateUser, getMyProfile).patch(authenticateUser, updateCurrentUser);
 router
   .route("/:id")
   .get(authenticateUser, adminAuthorization, getDetailUser)

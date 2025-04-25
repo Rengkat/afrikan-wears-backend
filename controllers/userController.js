@@ -78,7 +78,41 @@ const getDetailUser = async (req, res, next) => {
     next(error);
   }
 };
+const getMyProfile = async (req, res, next) => {
+  try {
+    const userId = req.user.id; // Extracted from authenticated token
 
+    // Validate user ID format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw new CustomError.BadRequestError("Invalid user ID format");
+    }
+
+    // Get user with essential fields only
+    const user = await User.findById(userId)
+      .select("-password -verificationToken -googleId -verificationTokenExpirationDate")
+      .lean();
+
+    if (!user) {
+      throw new CustomError.NotFoundError("User profile not found");
+    }
+
+    // Add any computed fields if needed
+    const profileData = {
+      ...user,
+      fullAddress:
+        user.addresses.length > 0
+          ? `${user.addresses[0].street}, ${user.addresses[0].city}, ${user.addresses[0].state}`
+          : null,
+    };
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      profile: profileData,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 const updateCurrentUser = async (req, res, next) => {
   const session = await mongoose.startSession();
   try {
@@ -252,4 +286,5 @@ module.exports = {
   updateCurrentUser,
   updateUser,
   deleteUser,
+  getMyProfile,
 };
