@@ -27,10 +27,49 @@ const orderItemSchema = new Schema(
       enum: ["pending", "processing", "shipped", "delivered", "cancelled", "returned"],
       default: "pending",
     },
+    orderType: {
+      type: String,
+      enum: ["standard", "custom"],
+      required: true,
+      default: "standard",
+    },
+    measurements: {
+      bustOrChest: Number,
+      waist: Number,
+      hips: Number,
+      upperBust: Number,
+      upperHip: Number,
+      neck: Number,
+      shoulder: Number,
+      tight: Number,
+      arm: Number,
+      wrist: Number,
+      frontBodice: Number,
+      hipToKnee: Number,
+      insideLegOrInseam: Number,
+      hipToAnkle: Number,
+      biceps: Number,
+      calf: Number,
+    },
+    materialSample: {
+      type: String,
+    },
+    paymentPlan: {
+      type: String,
+      enum: ["full", "partial"],
+      default: "full",
+    },
+    amountPaid: {
+      type: Number,
+      default: 0,
+    },
+    balanceDue: {
+      type: Number,
+      default: 0,
+    },
   },
   { _id: false }
 );
-
 const paymentInfoSchema = new Schema(
   {
     paymentMethod: {
@@ -40,7 +79,7 @@ const paymentInfoSchema = new Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["pending", "completed", "failed", "refunded"],
+      enum: ["pending", "completed", "failed", "refunded", "partially_paid"],
       default: "pending",
     },
     transactionId: String,
@@ -50,6 +89,10 @@ const paymentInfoSchema = new Schema(
       required: true,
     },
     paymentDate: Date,
+    balanceDue: {
+      type: Number,
+      default: 0,
+    },
   },
   { _id: false }
 );
