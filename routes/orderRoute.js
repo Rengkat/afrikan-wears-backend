@@ -1,12 +1,16 @@
 const express = require("express");
 const { createOrder, getMyOrders, getAllOrders } = require("../controllers/orderController");
-const { authenticateUser, adminAuthorization } = require("../middleware/authentication");
+const {
+  authenticateUser,
+  adminAuthorization,
+  restrictToUser,
+} = require("../middleware/authentication");
 
 const router = express.Router();
 // Customer routes
 router
   .route("/")
-  .post(authenticateUser, createOrder)
+  .post(authenticateUser, restrictToUser("user"), createOrder)
   .get(authenticateUser, adminAuthorization, getAllOrders);
 
 router.post("/verify-payment/:orderId", authenticateUser, getMyOrders);

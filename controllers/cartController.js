@@ -21,7 +21,6 @@ const addToCart = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
-    onlyUsers(req.user);
     const product = await Product.findById(productId).session(session);
     if (!product) {
       throw new CustomError.NotFoundError("Product not found");

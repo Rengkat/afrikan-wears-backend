@@ -244,7 +244,7 @@ const getSingleOrder = async (req, res, next) => {
     next(error);
   }
 };
-const getAllOrder = async (req, res, next) => {
+const getAllOrders = async (req, res, next) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const cacheKey = `orders:page:${page}:limit:${limit}`;

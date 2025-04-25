@@ -11,7 +11,10 @@ const { authenticateUser, restrictToUser } = require("../middleware/authenticati
 router
   .route("/")
   .post(authenticateUser, restrictToUser("user"), addToCart)
-  .get(authenticateUser, getAllCartProducts);
-router.route("/:id").delete(authenticateUser, removeFromCart).patch(authenticateUser, updateCart);
+  .get(authenticateUser, restrictToUser("user"), getAllCartProducts);
+router
+  .route("/:id")
+  .delete(authenticateUser, restrictToUser("user"), removeFromCart)
+  .patch(authenticateUser, restrictToUser("user"), updateCart);
 
 module.exports = router;

@@ -1,21 +1,74 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
+const { setInCache, getFromCache } = require("../utils/redisClient");
+const mongoose = require("mongoose");
 
 const getAllUsers = async (req, res, next) => {
-  console.log(req.user);
   try {
-    const users = await User.find({}).select("-password");
-    res.status(StatusCodes.OK).json({ success: true, count: users.length, users });
+    const { name, page = 1, limit = 10 } = req.query;
+    const cacheKey = `users:${name || ""}:page:${page}:limit:${limit}`;
+
+    // Check cache first
+    const cachedData = await getFromCache(cacheKey);
+    if (cachedData) {
+      return res.status(StatusCodes.OK).json({
+        fromCache: true,
+        success: true,
+        users: cachedData,
+      });
+    }
+
+    // Build query
+    const query = {};
+    if (name) {
+      query.name = { $regex: name, $options: "i" };
+    }
+
+    // Execute queries in parallel
+    const [users, total] = await Promise.all([
+      User.find(query)
+        .select("-password -verificationToken -googleId")
+        .skip((page - 1) * limit)
+        .limit(Number(limit))
+        .lean(),
+      User.countDocuments(query),
+    ]);
+
+    // Prepare response
+    const responseData = {
+      count: users.length,
+      totalUsers: total,
+      page: Number(page),
+      pages: Math.ceil(total / limit),
+      users,
+    };
+
+    // Cache the result
+    await setInCache(cacheKey, responseData);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      fromCache: false,
+      ...responseData,
+    });
   } catch (error) {
     next(error);
   }
 };
+
 const getDetailUser = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const user = await User.findById(id).select("-password");
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new CustomError.BadRequestError("Invalid user ID format");
+    }
+
+    const user = await User.findById(id).select(
+      "-password -verificationToken -googleId -verificationTokenExpirationDate"
+    );
+
     if (!user) {
       throw new CustomError.NotFoundError(`User with ID ${id} not found`);
     }
@@ -25,62 +78,178 @@ const getDetailUser = async (req, res, next) => {
     next(error);
   }
 };
+
 const updateCurrentUser = async (req, res, next) => {
+  const session = await mongoose.startSession();
   try {
-    const { name, email, addresses } = req.body;
+    session.startTransaction();
+    const { name, address } = req.body;
     const userId = req.user.id;
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId)
+      .session(session)
+      .select("-password -verificationToken -googleId");
+
     if (!user) {
       throw new CustomError.NotFoundError("User not found");
     }
 
-    user.name = name || user.name;
-    user.email = email || user.email;
-    user.addresses = addresses || user.addresses;
+    // Update name if provided
+    if (name) {
+      if (typeof name !== "string" || name.trim().length < 2) {
+        throw new CustomError.BadRequestError("Name must be at least 2 characters");
+      }
+      user.name = name.trim();
+    }
 
-    await user.save();
+    // Handle address addition
+    if (address) {
+      const requiredFields = ["country", "state", "city", "street", "postalCode", "homeAddress"];
+      const missingFields = requiredFields.filter((field) => !address[field]);
 
-    res.status(StatusCodes.OK).json({ success: true, user });
+      if (missingFields.length > 0) {
+        throw new CustomError.BadRequestError(
+          `Missing address fields: ${missingFields.join(", ")}`
+        );
+      }
+
+      // Check for duplicates
+      const isDuplicate = user.addresses.some((existingAddr) =>
+        requiredFields.every(
+          (field) =>
+            existingAddr[field]?.toString().toLowerCase() ===
+            address[field]?.toString().toLowerCase()
+        )
+      );
+
+      if (isDuplicate) {
+        throw new CustomError.BadRequestError("This address already exists");
+      }
+
+      user.addresses.push(address);
+
+      // Limit to 5 most recent addresses
+      if (user.addresses.length > 5) {
+        user.addresses = user.addresses.slice(-5);
+      }
+    }
+
+    await user.save({ session });
+    await session.commitTransaction();
+
+    const userResponse = user.toObject();
+    delete userResponse.verificationTokenExpirationDate;
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      user: userResponse,
+    });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
+
 const updateUser = async (req, res, next) => {
+  const session = await mongoose.startSession();
   try {
+    session.startTransaction();
     const { id } = req.params;
     const { name, email, role, addresses } = req.body;
 
-    const user = await User.findById(id);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new CustomError.BadRequestError("Invalid user ID format");
+    }
+
+    const user = await User.findById(id)
+      .session(session)
+      .select("-password -verificationToken -googleId");
+
     if (!user) {
       throw new CustomError.NotFoundError(`User with ID ${id} not found`);
     }
 
-    // Update user fields
-    user.name = name || user.name;
-    user.email = email || user.email;
-    user.role = role || user.role;
-    user.addresses = addresses || user.addresses;
+    // Validate and update fields
+    if (name) {
+      if (typeof name !== "string" || name.trim().length < 2) {
+        throw new CustomError.BadRequestError("Name must be at least 2 characters");
+      }
+      user.name = name.trim();
+    }
 
-    await user.save();
+    if (email) {
+      if (!validator.isEmail(email)) {
+        throw new CustomError.BadRequestError("Please provide a valid email");
+      }
+      user.email = email;
+    }
 
-    res.status(StatusCodes.OK).json({ success: true, user });
+    if (role) {
+      if (!["admin", "user", "stylist"].includes(role)) {
+        throw new CustomError.BadRequestError("Invalid role specified");
+      }
+      user.role = role;
+    }
+
+    if (addresses) {
+      if (!Array.isArray(addresses)) {
+        throw new CustomError.BadRequestError("Addresses must be an array");
+      }
+      user.addresses = addresses;
+    }
+
+    await user.save({ session });
+    await session.commitTransaction();
+
+    const userResponse = user.toObject();
+    delete userResponse.verificationTokenExpirationDate;
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      user: userResponse,
+    });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
+
 const deleteUser = async (req, res, next) => {
+  const session = await mongoose.startSession();
   try {
+    session.startTransaction();
     const { id } = req.params;
 
-    const user = await User.findByIdAndDelete(id);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new CustomError.BadRequestError("Invalid user ID format");
+    }
+
+    const user = await User.findByIdAndDelete(id).session(session);
     if (!user) {
       throw new CustomError.NotFoundError(`User with ID ${id} not found`);
     }
 
-    res.status(StatusCodes.OK).json({ success: true, message: "User deleted successfully" });
+    await session.commitTransaction();
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "User deleted successfully",
+    });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
-module.exports = { getAllUsers, getDetailUser, updateCurrentUser, updateUser, deleteUser };
+
+module.exports = {
+  getAllUsers,
+  getDetailUser,
+  updateCurrentUser,
+  updateUser,
+  deleteUser,
+};
