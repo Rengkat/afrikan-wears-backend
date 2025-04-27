@@ -136,7 +136,7 @@ app.use("/api/users", apiLimiter, userRouter);
 app.use("/api/cart", apiLimiter, cartRouter);
 app.use("/api/messages", apiLimiter, messageRouter);
 app.use("/api/stylists", apiLimiter, stylistRouter);
-app.use("./api/orders", apiLimiter, orderRoute);
+app.use("/api/orders", apiLimiter, orderRoute);
 // Error handling middleware
 app.use(notFoundMiddleware);
 app.use(errorHandlerMiddleware);

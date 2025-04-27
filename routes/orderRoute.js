@@ -4,11 +4,17 @@ const {
   getMyOrders,
   getAllOrders,
   completeCustomOrderPayment,
+  verifyPayment,
+  getSingleOrder,
+  getStylistOrders,
+  updateOrderStatus,
+  updateOrderItemStatus,
 } = require("../controllers/orderController");
 const {
   authenticateUser,
   adminAuthorization,
   restrictToUser,
+  adminAndStylistAuthorization,
 } = require("../middleware/authentication");
 
 const router = express.Router();
@@ -17,35 +23,33 @@ router
   .route("/")
   .post(authenticateUser, restrictToUser("user"), createOrder)
   .get(authenticateUser, adminAuthorization, getAllOrders);
+router.get("/my-orders", authenticateUser, getMyOrders);
+
+router.get(
+  "/stylist/orders",
+  authenticateUser,
+  adminAndStylistAuthorization("stylist"),
+  getStylistOrders
+);
 router.post("/balance-payment/:orderId", authenticateUser, completeCustomOrderPayment);
-router.post("/verify-payment/:orderId", authenticateUser, getMyOrders);
+router.post("/:orderId/verify-payment", authenticateUser, verifyPayment);
+router.get("/:id", authenticateUser, getSingleOrder);
 // router.get("/me", authenticateUser, getMyOrders);
 
-// router.get("/:id", authenticateUser, orderController.getSingleOrder);
-
 // // Stylist routes
-// router.get(
-//   "/stylist/orders",
-//   authenticateUser,
-//   authorizeRoles("stylist"),
-//   cacheMiddleware("stylist:orders"),
-//   orderController.getStylistOrders
-// );
 
-// router.patch(
-//   "/:id/status",
-//   authenticateUser,
-//   authorizeRoles("stylist"),
-//   clearCache(["user:*:orders*", "stylist:*:orders*"]),
-//   orderController.updateOrderStatus
-// );
+router.patch(
+  "/:id/status",
+  authenticateUser,
+  adminAndStylistAuthorization("admin", "stylist"),
+  updateOrderStatus
+);
 
-// router.patch(
-//   "/:id/items/:itemId/status",
-//   authenticateUser,
-//   authorizeRoles("stylist"),
-//   clearCache(["user:*:orders*", "stylist:*:orders*"]),
-//   orderController.updateOrderItemStatus
-// );
+router.patch(
+  "/:id/items/:itemId/status",
+  authenticateUser,
+  adminAndStylistAuthorization("admin", "stylist"),
+  updateOrderItemStatus
+);
 
 module.exports = router;
