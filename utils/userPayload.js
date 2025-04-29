@@ -4,6 +4,7 @@ const createUserPayload = (user) => {
     email: user.email,
     role: user.role,
     id: user._id,
+    company: user.company,
   };
 };
 module.exports = createUserPayload;

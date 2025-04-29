@@ -18,7 +18,6 @@ const addProduct = async (req, res, next) => {
       price,
       mainImage,
       subImages,
-      stylist,
       category,
       description,
       stock,
@@ -27,8 +26,19 @@ const addProduct = async (req, res, next) => {
       attributes,
     } = req.body;
 
-    if (!name || !price || !category || !stylist || !mongoose.Types.ObjectId.isValid(stylist)) {
-      throw new CustomError.BadRequestError("Provide valid name, price, category and stylist ID");
+    // Get user info from auth middleware
+    const { role, company, userId } = req.user;
+
+    // Validate required fields
+    if (!name || !price || !category || !mainImage || !description || stock === undefined) {
+      throw new CustomError.BadRequestError("Please provide all required product details");
+    }
+
+    // For stylists, ensure they can only add products for themselves
+    const stylistId = role === "stylist" ? company : req.body.stylist;
+
+    if (!stylistId || !mongoose.Types.ObjectId.isValid(stylistId)) {
+      throw new CustomError.BadRequestError("Provide valid stylist ID");
     }
 
     // Generate a unique SKU
@@ -40,33 +50,46 @@ const addProduct = async (req, res, next) => {
       throw new CustomError.BadRequestError("Product with this SKU already exists");
     }
 
+    // Create product
     const product = await Product.create(
       [
         {
           name,
           price,
           mainImage,
-          subImages,
-          stylist,
+          subImages: subImages || [],
+          stylist: stylistId,
           sku,
           category,
           description,
           stock,
-          rating,
-          featured,
-          attributes,
+          rating: role === "admin" ? rating || 0 : 0,
+          featured: role === "admin" ? featured || false : false,
+          attributes: attributes || {},
+          isAdminApproved: role === "admin",
+          createdBy: role,
+          status: role === "admin" ? "approved" : "pending",
         },
       ],
       { session }
     );
 
     await session.commitTransaction();
-    // Clear products cache as we've added a new product
+
+    // Clear products cache
     await clearCache("products:*");
+
+    // Optionally: Send notification to admin if product needs approval
+    if (role === "stylist") {
+      await notifyAdminsAboutNewProduct(product[0]);
+    }
+
     res.status(StatusCodes.CREATED).json({
       success: true,
       product: product[0],
-      message: "Product added successfully",
+      message: `Product added successfully${
+        role === "stylist" ? " and awaiting admin approval" : ""
+      }`,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -75,6 +98,7 @@ const addProduct = async (req, res, next) => {
     session.endSession();
   }
 };
+
 const getAllProducts = async (req, res, next) => {
   try {
     const { stylist, page = 1, name, limit = 10, category, featured } = req.query;

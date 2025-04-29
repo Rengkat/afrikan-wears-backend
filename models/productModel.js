@@ -87,6 +87,31 @@ const ProductSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isAdminApproved: {
+      type: Boolean,
+      default: false,
+    },
+
+    createdBy: {
+      type: String,
+      enum: ["admin", "stylist"],
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: [500, "Rejection reason cannot exceed 500 characters"],
+    },
+
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
     slug: {
       type: String,
       unique: true,
