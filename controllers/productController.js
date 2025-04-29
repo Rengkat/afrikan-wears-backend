@@ -298,6 +298,7 @@ const updateProduct = async (req, res, next) => {
   try {
     const { productId: id } = req.params;
     const updateData = req.body;
+    const { role, company, userId } = req.user;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw new CustomError.BadRequestError("Invalid product ID");
@@ -308,9 +309,26 @@ const updateProduct = async (req, res, next) => {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
     }
 
+    // Role-based update restrictions
+    if (role === "stylist") {
+      // Stylists can only update their own pending products
+      if (product.stylist.toString() !== company.toString() || product.status !== "pending") {
+        throw new CustomError.UnauthorizedError("You can only update your own pending products");
+      }
+    } else if (role === "customer") {
+      throw new CustomError.UnauthorizedError("Customers cannot update products");
+    }
+
     // Prevent SKU updates
     if (updateData.sku && updateData.sku !== product.sku) {
       throw new CustomError.BadRequestError("SKU cannot be changed");
+    }
+
+    // Admin-specific field restrictions
+    if (role !== "admin") {
+      delete updateData.featured;
+      delete updateData.isAdminApproved;
+      delete updateData.status;
     }
 
     // Update fields
@@ -325,6 +343,8 @@ const updateProduct = async (req, res, next) => {
       "rating",
       "featured",
       "attributes",
+      "status", // Only admins can update this
+      "rejectionReason", // Only admins can update this
     ];
 
     allowedUpdates.forEach((field) => {
@@ -333,10 +353,26 @@ const updateProduct = async (req, res, next) => {
       }
     });
 
+    // If admin is updating status, track who approved/rejected
+    if (role === "admin" && updateData.status) {
+      product.approvedBy = userId;
+      if (updateData.status === "approved") {
+        product.isAdminApproved = true;
+      }
+    }
+
     await product.save({ session });
     await session.commitTransaction();
-    // Clear both the specific product cache and the products list cache
+
+    // Clear cache and notify relevant parties
     await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
+
+    // Notify stylist if status changed
+    if (updateData.status && product.createdBy === "stylist") {
+      const stylist = await User.findById(product.stylist);
+      emitProductNotification(io, product, updateData.status, req.user);
+    }
+
     res.status(StatusCodes.OK).json({
       success: true,
       product,
