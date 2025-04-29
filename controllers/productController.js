@@ -368,10 +368,10 @@ const updateProduct = async (req, res, next) => {
     await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
 
     // Notify stylist if status changed
-    if (updateData.status && product.createdBy === "stylist") {
-      const stylist = await User.findById(product.stylist);
-      emitProductNotification(io, product, updateData.status, req.user);
-    }
+    // if (updateData.status && product.createdBy === "stylist") {
+    //   const stylist = await User.findById(product.stylist);
+    //   emitProductNotification(io, product, updateData.status, req.user);
+    // }
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -385,32 +385,49 @@ const updateProduct = async (req, res, next) => {
     session.endSession();
   }
 };
-
 const deleteProduct = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { productId: id } = req.params;
+    const { role, company } = req.user;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
 
-    // Check if product has any reviews
     const product = await Product.findById(id).session(session);
     if (!product) {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
     }
 
-    if (product.reviews.length > 0) {
+    // Role-based deletion restrictions
+    if (role === "stylist") {
+      // Stylists can only delete their own pending products
+      if (product.stylist.toString() !== company.toString() || product.status !== "pending") {
+        throw new CustomError.UnauthorizedError("You can only delete your own pending products");
+      }
+    } else if (role === "customer") {
+      throw new CustomError.UnauthorizedError("Customers cannot delete products");
+    }
+
+    // Check if product has any reviews (only if not admin)
+    if (role !== "admin" && product.reviews.length > 0) {
       throw new CustomError.BadRequestError("Cannot delete product with reviews");
     }
 
     await Product.findByIdAndDelete(id).session(session);
     await session.commitTransaction();
-    // Clear both the specific product cache and the products list cache
+
+    // Clear cache and notify
     await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
+
+    // Notify if product was deleted by admin
+    // if (role === "admin" && product.createdBy === "stylist") {
+    //   emitProductNotification(io, product, "deleted", req.user);
+    // }
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Product deleted successfully",
@@ -422,7 +439,6 @@ const deleteProduct = async (req, res, next) => {
     session.endSession();
   }
 };
-
 const uploadProductImage = async (req, res, next) => {
   let tempFilePath = null;
 
