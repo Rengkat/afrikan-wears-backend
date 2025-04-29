@@ -80,9 +80,9 @@ const addProduct = async (req, res, next) => {
     await clearCache("products:*");
 
     // Optionally: Send notification to admin if product needs approval
-    if (role === "stylist") {
-      await notifyAdminsAboutNewProduct(product[0]);
-    }
+    // if (role === "stylist") {
+    //   await notifyAdminsAboutNewProduct(product[0]);
+    // }
 
     res.status(StatusCodes.CREATED).json({
       success: true,
@@ -98,15 +98,78 @@ const addProduct = async (req, res, next) => {
     session.endSession();
   }
 };
+const verifyProduct = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
+  try {
+    const { productId } = req.params;
+    const { action } = req.body;
+    const { userId } = req.user;
+
+    if (!["approve", "reject"].includes(action)) {
+      throw new CustomError.BadRequestError("Invalid action. Use 'approve' or 'reject'");
+    }
+
+    const product = await Product.findById(productId).session(session);
+    if (!product) {
+      throw new CustomError.NotFoundError("Product not found");
+    }
+
+    // Check if product needs verification
+    if (product.createdBy !== "stylist" || product.status !== "pending") {
+      throw new CustomError.BadRequestError("This product does not require verification");
+    }
+
+    if (action === "approve") {
+      product.isAdminApproved = true;
+      product.status = "approved";
+      product.approvedBy = userId;
+      product.rejectionReason = undefined;
+    } else {
+      const { reason } = req.body;
+      if (!reason || reason.trim().length < 10) {
+        throw new CustomError.BadRequestError(
+          "Please provide a valid rejection reason (min 10 chars)"
+        );
+      }
+
+      product.isAdminApproved = false;
+      product.status = "rejected";
+      product.rejectionReason = reason;
+      product.approvedBy = userId;
+    }
+
+    await product.save({ session });
+    await session.commitTransaction();
+
+    // Clear cache
+    await clearCache("products:*");
+
+    // Notify stylist about the decision
+    // await notifyStylistAboutProductStatus(product, action);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Product ${action === "approve" ? "approved" : "rejected"} successfully`,
+      product,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
 const getAllProducts = async (req, res, next) => {
   try {
-    const { stylist, page = 1, name, limit = 10, category, featured } = req.query;
+    const { role, company, userId } = req.user;
+    const { stylist, page = 1, name, limit = 10, category, featured, status } = req.query;
 
-    // Create a unique cache key based on the query parameters
-    const cacheKey = `products:${stylist || "all"}:${page}:${limit}:${name || ""}:${
-      category || ""
-    }:${featured || ""}`;
+    // Create a unique cache key based on all parameters
+    const cacheKey = `products:${role}:${userId}:${stylist || "all"}:${page}:${limit}:${
+      name || ""
+    }:${category || ""}:${featured || ""}:${status || ""}`;
 
     // Try to get data from cache first
     const cachedData = await getFromCache(cacheKey);
@@ -118,8 +181,21 @@ const getAllProducts = async (req, res, next) => {
       });
     }
 
+    // Base query object
     const query = {};
-    // Apply filters if provided
+
+    // Role-based visibility rules
+    if (role === "customer") {
+      query.status = "approved";
+    } else if (role === "stylist") {
+      query.$or = [
+        { status: "approved" },
+        { stylist: company, createdBy: "stylist" }, // Their own products
+      ];
+    }
+    // Admins can see all products by default
+
+    // Additional filters
     if (stylist) {
       if (!mongoose.Types.ObjectId.isValid(stylist)) {
         throw new CustomError.BadRequestError("Invalid stylist ID");
@@ -130,13 +206,24 @@ const getAllProducts = async (req, res, next) => {
     if (category) query.category = category;
     if (featured) query.featured = featured === "true";
 
+    // Status filter (especially useful for admin)
+    if (status && ["pending", "approved", "rejected"].includes(status)) {
+      // For stylists, we need to ensure they can only filter their own pending/rejected products
+      if (role === "stylist" && status !== "approved") {
+        query.$and = [{ status }, { stylist: company, createdBy: "stylist" }];
+      } else {
+        query.status = status;
+      }
+    }
+
     // Pagination
     const skip = (page - 1) * limit;
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select("name price mainImage rating category featured")
-        .populate("stylist", "name")
+        .select("name price mainImage rating category featured status createdBy")
+        .populate("stylist", "name email")
+        .populate("approvedBy", "name")
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -152,7 +239,7 @@ const getAllProducts = async (req, res, next) => {
     };
 
     // Cache the response for 1 hour (3600 seconds)
-    await setInCache(cacheKey, responseData);
+    await setInCache(cacheKey, responseData, 3600);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -463,4 +550,5 @@ module.exports = {
   uploadProductImage,
   addReview,
   updateReview,
+  verifyProduct,
 };
