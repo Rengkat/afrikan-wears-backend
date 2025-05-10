@@ -296,21 +296,7 @@ const verifyPayment = async (req, res, next) => {
     await session.commitTransaction();
 
     // Notify stylists and admin
-    // order.orderItems.forEach((item) => {
-    //   if (!item.stylist || !item.product) return;
-    //   emitMessageEvent(req.io, "newOrder", {
-    //     orderId: order._id.toString(),
-    //     stylistId: item.stylist.toString(),
-    //     productId: item.product.toString(),
-    //     quantity: item.quantity,
-    //   });
-    //   emitMessageEvent(req.io, "notification", {
-    //     orderId: order._id.toString(),
-    //     stylistId: item.stylist.toString(),
-    //     productId: item.product.toString(),
-    //     quantity: item.quantity,
-    //   });
-    // });
+    // Also send email message to both customer and the stylist
 
     res.status(StatusCodes.OK).json({
       success: true,

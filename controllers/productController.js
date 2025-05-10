@@ -1,5 +1,6 @@
 const Product = require("../models/productModel");
 const CustomError = require("../errors");
+const Order = require("../models/orderModel");
 const { StatusCodes } = require("http-status-codes");
 const generateSKU = require("../utils/skuGenerator");
 const { writeClient } = require("../utils");
@@ -171,7 +172,7 @@ const getAllProducts = async (req, res, next) => {
       name || ""
     }:${category || ""}:${featured || ""}:${status || ""}`;
 
-    // Try to get data from cache first
+    // get data from cache first
     const cachedData = await getFromCache(cacheKey);
     if (cachedData) {
       return res.status(StatusCodes.OK).json({
@@ -181,11 +182,10 @@ const getAllProducts = async (req, res, next) => {
       });
     }
 
-    // Base query object
     const query = {};
 
-    // Role-based visibility rules
-    if (role === "customer") {
+    // Role-based visibility rules- for users, only approved
+    if (role === "user") {
       query.status = "approved";
     } else if (role === "stylist") {
       query.$or = [
@@ -222,7 +222,7 @@ const getAllProducts = async (req, res, next) => {
     const [products, total] = await Promise.all([
       Product.find(query)
         .select("name price mainImage rating category featured status createdBy")
-        .populate("stylist", "name email")
+        .populate("stylist", "name")
         .populate("approvedBy", "name")
         .skip(skip)
         .limit(limit)
@@ -315,7 +315,7 @@ const updateProduct = async (req, res, next) => {
       if (product.stylist.toString() !== company.toString() || product.status !== "pending") {
         throw new CustomError.UnauthorizedError("You can only update your own pending products");
       }
-    } else if (role === "customer") {
+    } else if (role === "user") {
       throw new CustomError.UnauthorizedError("Customers cannot update products");
     }
 
@@ -343,8 +343,8 @@ const updateProduct = async (req, res, next) => {
       "rating",
       "featured",
       "attributes",
-      "status", // Only admins can update this
-      "rejectionReason", // Only admins can update this
+      "status",
+      "rejectionReason",
     ];
 
     allowedUpdates.forEach((field) => {
@@ -489,16 +489,13 @@ const uploadProductImage = async (req, res, next) => {
     }
   }
 };
-
 const addReview = async (req, res, next) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { productId } = req.params;
     const { comment, rating } = req.body;
     const userId = req.user.id;
 
+    // Initial validations
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
@@ -507,41 +504,62 @@ const addReview = async (req, res, next) => {
       throw new CustomError.BadRequestError("Rating must be between 0 and 5");
     }
 
-    const product = await Product.findById(productId).session(session);
-    if (!product) {
-      throw new CustomError.NotFoundError("Product not found");
-    }
-
-    const existingReview = product.reviews.find(
-      (review) => review.user.toString() === userId.toString()
-    );
-    if (existingReview) {
-      throw new CustomError.BadRequestError("You already reviewed this product");
-    }
-
-    product.reviews.push({
-      user: userId,
-      rating,
-      comment: comment || "",
+    // Check if user has purchased the product
+    const userOrders = await Order.find({
+      customer: userId,
+      "orderItems.product": productId,
+      "orderItems.status": "delivered",
     });
 
-    await product.save({ session });
-    await session.commitTransaction();
-    // Clear the product cache as reviews affect the product data
-    await clearCache(`product:${productId}`);
-    res.status(StatusCodes.CREATED).json({
-      success: true,
-      data: product,
-      averageRating: product.averageRating,
-    });
+    if (userOrders.length === 0) {
+      throw new CustomError.BadRequestError(
+        "You can only rate delivered products purchased by you"
+      );
+    }
+
+    // Start transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const product = await Product.findById(productId).session(session);
+      if (!product) {
+        throw new CustomError.NotFoundError("Product not found");
+      }
+
+      const existingReview = product.reviews.find(
+        (review) => review.user.toString() === userId.toString()
+      );
+      if (existingReview) {
+        throw new CustomError.BadRequestError("You already reviewed this product");
+      }
+
+      product.reviews.push({
+        user: userId,
+        rating,
+        comment: comment || "",
+      });
+
+      await product.save({ session });
+      await session.commitTransaction();
+
+      await clearCache(`product:${productId}`);
+
+      res.status(StatusCodes.CREATED).json({
+        success: true,
+        data: product,
+        averageRating: product.averageRating,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
   } catch (error) {
-    await session.abortTransaction();
     next(error);
-  } finally {
-    session.endSession();
   }
 };
-
 const updateReview = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
