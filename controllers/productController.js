@@ -80,7 +80,7 @@ const addProduct = async (req, res, next) => {
 
     // Clear products cache
     await clearCache("products:*");
-
+    // notification to the admin
     emitNotificationEvent(req.io, "newNotification", {
       type: "product-approval",
       message: "New product awaiting approval",
@@ -154,7 +154,15 @@ const verifyProduct = async (req, res, next) => {
     await clearCache("products:*");
 
     // Notify stylist about the decision
-
+    // After product approval
+    emitNotificationEvent(req.io, "newNotification", {
+      type: "product-approved",
+      message: "Your product has been approved",
+      productId: product._id,
+      productName: product.name,
+      stylistId: product.stylist,
+      timestamp: new Date(),
+    });
     res.status(StatusCodes.OK).json({
       success: true,
       message: `Product ${action === "approve" ? "approved" : "rejected"} successfully`,
