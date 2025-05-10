@@ -8,6 +8,7 @@ const fs = require("fs").promises;
 const path = require("path");
 const mongoose = require("mongoose");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
+const { emitNotificationEvent } = require("../utils/socket");
 
 const addProduct = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -80,10 +81,15 @@ const addProduct = async (req, res, next) => {
     // Clear products cache
     await clearCache("products:*");
 
-    // Optionally: Send notification to admin if product needs approval
-    // if (role === "stylist") {
-    //   await notifyAdminsAboutNewProduct(product[0]);
-    // }
+    emitNotificationEvent(req.io, "newNotification", {
+      type: "product-approval",
+      message: "New product awaiting approval",
+      productId: product._id,
+      productName: product.name,
+      stylistId: req.user.id,
+      stylistName: req.user.name,
+      timestamp: new Date(),
+    });
 
     res.status(StatusCodes.CREATED).json({
       success: true,
@@ -148,7 +154,6 @@ const verifyProduct = async (req, res, next) => {
     await clearCache("products:*");
 
     // Notify stylist about the decision
-    // await notifyStylistAboutProductStatus(product, action);
 
     res.status(StatusCodes.OK).json({
       success: true,
