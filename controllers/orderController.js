@@ -6,6 +6,7 @@ const CustomError = require("../errors");
 const mongoose = require("mongoose");
 const { emitMessageEvent } = require("../utils");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
+const { emitNotificationEvent } = require("../utils/socket");
 const paystack = require("paystack-api")(process.env.PAYSTACK_SECRET_KEY);
 const createOrder = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -296,6 +297,19 @@ const verifyPayment = async (req, res, next) => {
     await session.commitTransaction();
 
     // Notify stylists and admin
+    // After order creation
+    const stylistIds = [...new Set(orderItems.map((item) => item.stylist.toString()))];
+
+    emitNotificationEvent(req.io, "newNotification", {
+      type: "new-order",
+      message: "New order received",
+      orderId: order._id,
+      customerId: userId,
+      customerName: req.user.name,
+      stylists: stylistIds,
+      totalPrice: totalPrice,
+      timestamp: new Date(),
+    });
     // Also send email message to both customer and the stylist
 
     res.status(StatusCodes.OK).json({
@@ -492,10 +506,14 @@ const updateOrderStatus = async (req, res, next) => {
     await clearCache(`stylist:${userId}:orders*`);
 
     // Notify customer about order status change
-    emitMessageEvent(req.io, "orderStatusChanged", {
+    // After status update
+    emitNotificationEvent(req.io, "newNotification", {
+      type: "order-status",
+      message: `Your order status has been updated to ${status}`,
       orderId: order._id,
       customerId: order.customer,
       newStatus: status,
+      timestamp: new Date(),
     });
 
     res.status(StatusCodes.OK).json({
