@@ -1,12 +1,14 @@
 const Order = require("../models/orderModel");
+const Stylist = require("../models/stylistModel");
 const Product = require("../models/productModel");
+const User = require("../models/userModel");
 const Cart = require("../models/cartModel");
 const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
 const mongoose = require("mongoose");
 const { emitMessageEvent } = require("../utils");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
-const { emitNotificationEvent } = require("../utils/socket");
+const { emitNotification } = require("../utils/socket");
 const paystack = require("paystack-api")(process.env.PAYSTACK_SECRET_KEY);
 const createOrder = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -297,19 +299,65 @@ const verifyPayment = async (req, res, next) => {
     await session.commitTransaction();
 
     // Notify stylists and admin
-    // After order creation
-    const stylistIds = [...new Set(orderItems.map((item) => item.stylist.toString()))];
+    // After successful payment processing:
+    const customer = await User.findById(order.customer).select("name").lean();
+    const customerName = customer?.name || "Customer";
 
-    emitNotificationEvent(req.io, "newNotification", {
-      type: "new-order",
-      message: "New order received",
-      orderId: order._id,
-      customerId: userId,
-      customerName: req.user.name,
-      stylists: stylistIds,
-      totalPrice: totalPrice,
-      timestamp: new Date(),
-    });
+    // Admin notification
+    const adminNotification = {
+      type: "new_order",
+      message: `New order #${order.orderNumber} (N${order.totalPrice})`,
+      data: {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        customerName,
+        totalAmount: order.totalPrice,
+        itemsCount: order.orderItems.length,
+        timestamp: new Date(),
+      },
+    };
+    emitNotification(req.io, "newNotification", adminNotification, "admin_room");
+
+    // Stylist notifications
+    const stylistNotifications = new Map();
+
+    for (const item of order.orderItems) {
+      if (!item.stylist) continue;
+
+      const stylistId = item.stylist.toString();
+      const product = await Product.findById(item.product).select("name").lean();
+
+      if (!stylistNotifications.has(stylistId)) {
+        const stylist = await Stylist.findById(stylistId).select("name").lean();
+        stylistNotifications.set(stylistId, {
+          stylistName: stylist?.name || "Stylist",
+          items: [],
+        });
+      }
+
+      stylistNotifications.get(stylistId).items.push({
+        productName: product?.name || "Product",
+        quantity: item.quantity,
+        price: item.priceAtPurchase,
+      });
+    }
+
+    // Send individual notifications to each stylist
+    for (const [stylistId, data] of stylistNotifications) {
+      const stylistNotification = {
+        type: "new_order",
+        message: `New order for your products (Order #${order.orderNumber})`,
+        data: {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          customerName,
+          items: data.items,
+          timestamp: new Date(),
+        },
+      };
+      emitNotification(req.io, "newNotification", stylistNotification, stylistId);
+    }
+
     // Also send email message to both customer and the stylist
 
     res.status(StatusCodes.OK).json({
@@ -506,15 +554,18 @@ const updateOrderStatus = async (req, res, next) => {
     await clearCache(`stylist:${userId}:orders*`);
 
     // Notify customer about order status change
-    // After status update
-    emitNotificationEvent(req.io, "newNotification", {
-      type: "order-status",
-      message: `Your order status has been updated to ${status}`,
-      orderId: order._id,
-      customerId: order.customer,
-      newStatus: status,
-      timestamp: new Date(),
-    });
+    const statusNotification = {
+      type: "order_status_update",
+      message: `Your order status is now: ${status}`,
+      data: {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        newStatus: status,
+        updatedAt: new Date(),
+      },
+    };
+
+    emitNotification(req.io, "newNotification", statusNotification, order.customer.toString());
 
     res.status(StatusCodes.OK).json({
       success: true,

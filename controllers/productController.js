@@ -8,7 +8,8 @@ const fs = require("fs").promises;
 const path = require("path");
 const mongoose = require("mongoose");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
-const { emitNotificationEvent } = require("../utils/socket");
+const Stylist = require("../models/stylistModel");
+const { emitNotification } = require("../utils/socket");
 
 const addProduct = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -78,19 +79,26 @@ const addProduct = async (req, res, next) => {
 
     await session.commitTransaction();
 
-    // Clear products cache
+    // Clear cache
     await clearCache("products:*");
-    // notification to the admin
-    emitNotificationEvent(req.io, "newNotification", {
-      type: "product-approval",
-      message: "New product awaiting approval",
-      productId: product._id,
-      productName: product.name,
-      stylistId: req.user.id,
-      stylistName: req.user.name,
-      timestamp: new Date(),
-    });
 
+    // Notification for stylist-created products
+    if (role === "stylist") {
+      const stylistCompany = await Stylist.findById(company).select("name").lean();
+
+      const notificationPayload = {
+        type: "product_approval_request",
+        message: `New product "${product[0].name}" requires approval`,
+        data: {
+          productId: product[0]._id,
+          productName: product[0].name,
+          stylistId: stylistId,
+          stylistName: stylistCompany?.name || "Stylist",
+          createdAt: new Date(),
+        },
+      };
+      emitNotification(req.io, "newNotification", notificationPayload, "admin_room");
+    }
     res.status(StatusCodes.CREATED).json({
       success: true,
       product: product[0],
@@ -133,6 +141,24 @@ const verifyProduct = async (req, res, next) => {
       product.status = "approved";
       product.approvedBy = userId;
       product.rejectionReason = undefined;
+      // Notify stylist
+      if (product.stylist) {
+        const notificationPayload = {
+          type: "product_approved",
+          message: `Your product "${product.name}" was approved`,
+          data: {
+            productId: product._id,
+            productName: product.name,
+            approvedAt: new Date(),
+          },
+        };
+        emitNotification(
+          req.io,
+          "newNotification",
+          notificationPayload,
+          product.stylist.toString()
+        );
+      }
     } else {
       const { reason } = req.body;
       if (!reason || reason.trim().length < 10) {
@@ -145,6 +171,25 @@ const verifyProduct = async (req, res, next) => {
       product.status = "rejected";
       product.rejectionReason = reason;
       product.approvedBy = userId;
+      // Notify stylist with reason
+      if (product.stylist) {
+        const notificationPayload = {
+          type: "product_rejected",
+          message: `Your product "${product.name}" was rejected`,
+          data: {
+            productId: product._id,
+            productName: product.name,
+            rejectionReason: reason,
+            rejectedAt: new Date(),
+          },
+        };
+        emitNotification(
+          req.io,
+          "newNotification",
+          notificationPayload,
+          product.stylist.toString()
+        );
+      }
     }
 
     await product.save({ session });
@@ -153,16 +198,6 @@ const verifyProduct = async (req, res, next) => {
     // Clear cache
     await clearCache("products:*");
 
-    // Notify stylist about the decision
-    // After product approval
-    emitNotificationEvent(req.io, "newNotification", {
-      type: "product-approved",
-      message: "Your product has been approved",
-      productId: product._id,
-      productName: product.name,
-      stylistId: product.stylist,
-      timestamp: new Date(),
-    });
     res.status(StatusCodes.OK).json({
       success: true,
       message: `Product ${action === "approve" ? "approved" : "rejected"} successfully`,

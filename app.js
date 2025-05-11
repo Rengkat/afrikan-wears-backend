@@ -15,6 +15,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const passport = require("passport");
 const session = require("express-session");
+const User = require("./models/userModel");
 const app = express();
 const server = http.createServer(app);
 
@@ -92,14 +93,41 @@ app.use((req, res, next) => {
   req.io = io;
   next();
 });
-
 // Socket.io events
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
 
-  socket.on("joinUser", (userId) => {
-    socket.join(userId);
-    console.log(`User ${socket.id} joined: ${userId}`);
+  // Client should send userId upon connection or after auth, e.g., in handshake query
+  const userId = socket.handshake.query.userId;
+
+  if (userId) {
+    socket.join(userId.toString());
+    console.log(`User ${socket.id} with ID ${userId} joined personal room: ${userId}`);
+
+    // Join role-based rooms (e.g., for admins)
+    // This requires fetching user details or having role in JWT decoded earlier
+    (async () => {
+      try {
+        const user = await User.findById(userId).select("role").lean(); // Efficiently get role
+        if (user && user.role === "admin") {
+          socket.join("admin_room");
+          console.log(`Admin user ${userId} (socket: ${socket.id}) joined admin_room`);
+        }
+        // You could also have 'stylist_room' if needed for general stylist broadcasts
+      } catch (error) {
+        console.error(`Error fetching user role for ${userId}:`, error);
+      }
+    })();
+  } else {
+    console.warn(`Socket ${socket.id} connected without userId in handshake query.`);
+  }
+
+  // Optional: if you still want an explicit join event from client
+  socket.on("joinUser", (idToJoin) => {
+    if (idToJoin) {
+      socket.join(idToJoin.toString());
+      console.log(`User ${socket.id} explicitly joined room: ${idToJoin}`);
+    }
   });
 
   socket.on("error", (error) => {
@@ -108,6 +136,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("A user disconnected:", socket.id);
+    // Socket.IO automatically removes disconnected sockets from rooms.
   });
 });
 

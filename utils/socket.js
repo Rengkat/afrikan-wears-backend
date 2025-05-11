@@ -1,41 +1,73 @@
-const emitNotificationEvent = (io, event, notification) => {
-  // Emit to specific user(s) based on notification type
-  switch (notification.type) {
-    case "message":
-      // For messages (existing functionality)
-      io.to(notification.receiver.toString()).emit(event, notification);
-      io.to(notification.sender.toString()).emit(event, notification);
-      break;
+const CustomError = require("../errors");
 
-    case "product-approval":
-      // For product approval notifications (to admin)
-      io.to("admin").emit(event, notification);
-      break;
+// Standardized notification emitter
+const emitNotification = (io, eventName, payload, target) => {
+  if (!io) {
+    throw new CustomError.BadRequestError("Socket.IO instance (io) is undefined");
+  }
 
-    case "product-approved":
-      // For product approved notifications (to stylist)
-      io.to(notification.stylistId.toString()).emit(event, notification);
-      break;
+  if (!eventName || !payload || !target) {
+    throw new CustomError.BadRequestError("Missing required parameters for notification");
+  }
 
-    case "new-order":
-      // For new order notifications (to admin and stylist)
-      io.to("admin").emit(event, notification);
-      notification.stylists.forEach((stylistId) => {
-        io.to(stylistId.toString()).emit(event, notification);
+  try {
+    if (Array.isArray(target)) {
+      target.forEach((userId) => {
+        io.to(userId.toString()).emit(eventName, payload);
+        console.log(`Emitted ${eventName} to user ${userId}`);
       });
-      break;
-
-    case "order-status":
-      // For order status updates (to customer)
-      io.to(notification.customerId.toString()).emit(event, notification);
-      break;
-
-    default:
-      console.warn(`Unknown notification type: ${notification.type}`);
+    } else if (typeof target === "string") {
+      io.to(target).emit(eventName, payload);
+      console.log(`Emitted ${eventName} to ${target}`);
+    } else {
+      throw new CustomError.BadRequestError("Invalid target type for notification");
+    }
+  } catch (error) {
+    console.error("Notification emission failed:", error);
+    throw error;
   }
 };
 
-module.exports = {
-  emitMessageEvent: emitNotificationEvent, // Keep backward compatibility
-  emitNotificationEvent,
+// Enhanced message event emitter
+const emitMessageEvent = (io, eventName, message, initiatorId = null) => {
+  if (!io || !message) {
+    throw new CustomError.BadRequestError("Invalid parameters for message emission");
+  }
+
+  const validEvents = ["newMessage", "messageUpdated", "messageDeleted"];
+  if (!validEvents.includes(eventName)) {
+    throw new CustomError.BadRequestError(`Invalid message event: ${eventName}`);
+  }
+
+  try {
+    const senderId = message.sender?.toString();
+    const receiverId = message.receiver?.toString();
+
+    if (!senderId || !receiverId) {
+      throw new CustomError.BadRequestError("Message missing sender/receiver");
+    }
+
+    switch (eventName) {
+      case "newMessage":
+        io.to(senderId).emit(eventName, message); // For UI confirmation
+        io.to(receiverId).emit(eventName, message);
+        break;
+
+      case "messageDeleted":
+        const targetId = initiatorId?.toString() === senderId ? receiverId : senderId;
+        io.to(targetId).emit(eventName, message);
+        break;
+
+      default:
+        io.to(senderId).emit(eventName, message);
+        io.to(receiverId).emit(eventName, message);
+    }
+
+    console.log(`Emitted ${eventName} between ${senderId} and ${receiverId}`);
+  } catch (error) {
+    console.error("Message emission failed:", error);
+    throw error;
+  }
 };
+
+module.exports = { emitNotification, emitMessageEvent };

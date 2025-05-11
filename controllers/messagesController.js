@@ -1,8 +1,8 @@
 const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
 const Message = require("../models/messageModel");
-const { emitMessageEvent } = require("../utils");
 const mongoose = require("mongoose");
+const { emitMessageEvent } = require("../utils");
 
 const sendMessage = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -105,8 +105,10 @@ const updateMessage = async (req, res, next) => {
       throw new CustomError.NotFoundError("Message not found");
     }
 
-    // Emit the updated message to the receiver via Socket.IO
-    emitMessageEvent(req.io, "messageUpdated", message);
+    if (read) {
+      // Only emit update if message is being marked as read
+      emitMessageEvent(req.io, "messageUpdated", message, req.user.id);
+    }
 
     await session.commitTransaction();
     res.status(StatusCodes.OK).json({
