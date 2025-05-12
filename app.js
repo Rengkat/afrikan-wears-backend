@@ -113,7 +113,7 @@ io.on("connection", (socket) => {
           socket.join("admin_room");
           console.log(`Admin user ${userId} (socket: ${socket.id}) joined admin_room`);
         }
-        // You could also have 'stylist_room' if needed for general stylist broadcasts
+        //  also have 'stylist_room' if needed for general stylist broadcasts
       } catch (error) {
         console.error(`Error fetching user role for ${userId}:`, error);
       }
@@ -121,14 +121,6 @@ io.on("connection", (socket) => {
   } else {
     console.warn(`Socket ${socket.id} connected without userId in handshake query.`);
   }
-
-  // Optional: if you still want an explicit join event from client
-  socket.on("joinUser", (idToJoin) => {
-    if (idToJoin) {
-      socket.join(idToJoin.toString());
-      console.log(`User ${socket.id} explicitly joined room: ${idToJoin}`);
-    }
-  });
 
   socket.on("error", (error) => {
     console.error("Socket error:", error);
