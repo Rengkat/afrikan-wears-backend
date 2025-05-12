@@ -2,14 +2,16 @@ const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
 const Message = require("../models/messageModel");
 const mongoose = require("mongoose");
-const { emitMessageEvent } = require("../utils");
+const fs = require("fs").promises;
+
+const { emitMessageEvent, writeClient } = require("../utils");
 
 const sendMessage = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { sender, receiver, content } = req.body;
+    const { sender, receiver, content, image } = req.body;
 
     if (!sender || !receiver || !content) {
       throw new CustomError.BadRequestError("Please provide all fields");
@@ -23,7 +25,7 @@ const sendMessage = async (req, res, next) => {
       throw new CustomError.BadRequestError("Cannot send message to yourself");
     }
 
-    const message = await Message.create([{ sender, receiver, content }], { session });
+    const message = await Message.create([{ sender, receiver, content, image }], { session });
 
     // Emit the new message to the receiver via Socket.IO
     emitMessageEvent(req.io, "newMessage", message[0]);
@@ -156,10 +158,60 @@ const deleteMessage = async (req, res, next) => {
     session.endSession();
   }
 };
+const uploadMessageImage = async (req, res, next) => {
+  let tempFilePath = null;
 
+  try {
+    if (!req.files?.image) {
+      throw new CustomError.BadRequestError("No image file uploaded");
+    }
+
+    const imageFile = req.files.image;
+    tempFilePath = imageFile.tempFilePath;
+    const fileBuffer = await fs.readFile(tempFilePath);
+
+    // Upload the image asset
+    const uploadResult = await writeClient.assets.upload("image", fileBuffer, {
+      filename: imageFile.name,
+      contentType: imageFile.mimetype,
+    });
+
+    // Create an imageStorage document referencing the asset
+    const doc = await writeClient.create({
+      _type: "messageImageStorage",
+      image: {
+        _type: "image",
+        asset: {
+          _type: "reference",
+          _ref: uploadResult._id,
+        },
+      },
+    });
+
+    const imageUrl = `${uploadResult.url}?w=500&h=500&fit=crop`;
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      imageUrl,
+      documentId: doc._id,
+      message: "Image uploaded and documented successfully",
+    });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (e) {
+        console.error("Error deleting temp file:", e);
+      }
+    }
+  }
+};
 module.exports = {
   sendMessage,
   getMessages,
   updateMessage,
   deleteMessage,
+  uploadMessageImage,
 };
