@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 const { emitMessageEvent } = require("../utils");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
 const { emitNotification } = require("../utils/socket");
+const sendPlacedOrderEmail = require("../utils/Email/sendOrderEmail");
 const paystack = require("paystack-api")(process.env.PAYSTACK_SECRET_KEY);
 const createOrder = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -359,7 +360,12 @@ const verifyPayment = async (req, res, next) => {
     }
 
     // Also send email message to both customer and the stylist
-
+    sendPlacedOrderEmail({
+      name: req.user.name,
+      email: req.user.email,
+      origin: process.env.ORIGIN,
+      payload: order,
+    });
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Payment verified successfully",
