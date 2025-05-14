@@ -301,7 +301,7 @@ const verifyPayment = async (req, res, next) => {
 
     // Notify stylists and admin
     // After successful payment processing:
-    const customer = await User.findById(order.customer).select("name").lean();
+    const customer = await User.findById(order.customer).select("name email").lean();
     const customerName = customer?.name || "Customer";
 
     // Admin notification
@@ -360,12 +360,14 @@ const verifyPayment = async (req, res, next) => {
     }
 
     // Also send email message to both customer and the stylist
-    sendPlacedOrderEmail({
-      name: req.user.name,
-      email: req.user.email,
+    // Send email to customer
+    await sendPlacedOrderEmail({
+      name: customer?.name || "Customer",
+      email: customer?.email,
       origin: process.env.ORIGIN,
       payload: order,
     });
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Payment verified successfully",
@@ -558,6 +560,7 @@ const updateOrderStatus = async (req, res, next) => {
     // Clear relevant caches
     await clearCache(`user:${order.customer}:orders*`);
     await clearCache(`stylist:${userId}:orders*`);
+    const customer = await User.findById(order.customer).select("name email").lean();
 
     // Notify customer about order status change
     const statusNotification = {
@@ -570,6 +573,12 @@ const updateOrderStatus = async (req, res, next) => {
         updatedAt: new Date(),
       },
     };
+    await sendPlacedOrderEmail({
+      name: customer?.name || "Customer",
+      email: customer?.email,
+      origin: process.env.ORIGIN,
+      payload: order,
+    });
 
     emitNotification(req.io, "newNotification", statusNotification, order.customer.toString());
 
