@@ -1,6 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const wishlistController = require("../controllers/wishlistController");
+const {
+  addToWishlist,
+  getMyWishlist,
+  removeFromWishlist,
+  moveToCart,
+} = require("../controllers/wishlistController");
 const { authenticateUser, restrictToUser } = require("../middleware/authentication");
 
 router.use(authenticateUser);
