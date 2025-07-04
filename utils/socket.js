@@ -1,7 +1,7 @@
 const CustomError = require("../errors");
-
+const Notification = require("../models/notificationModel");
 // Standardized notification emitter
-const emitNotification = (io, eventName, payload, target) => {
+const emitNotification = async (io, eventName, payload, target) => {
   if (!io) {
     throw new CustomError.BadRequestError("Socket.IO instance (io) is undefined");
   }
@@ -11,16 +11,22 @@ const emitNotification = (io, eventName, payload, target) => {
   }
 
   try {
+    // Persist notification to database
+    const notification = await Notification.create({
+      recipient: target,
+      type: payload.type,
+      message: payload.message,
+      data: payload.data,
+      ...(payload.sender && { sender: payload.sender }),
+    });
+
+    // Emit via socket
     if (Array.isArray(target)) {
       target.forEach((userId) => {
-        io.to(userId.toString()).emit(eventName, payload);
-        console.log(`Emitted ${eventName} to user ${userId}`);
+        io.to(userId.toString()).emit(eventName, notification);
       });
-    } else if (typeof target === "string") {
-      io.to(target).emit(eventName, payload);
-      console.log(`Emitted ${eventName} to ${target}`);
     } else {
-      throw new CustomError.BadRequestError("Invalid target type for notification");
+      io.to(target.toString()).emit(eventName, notification);
     }
   } catch (error) {
     console.error("Notification emission failed:", error);

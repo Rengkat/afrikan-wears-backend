@@ -30,7 +30,8 @@ const cartRouter = require("./routes/cartRoute");
 const messageRouter = require("./routes/messagesRoute");
 const stylistRouter = require("./routes/stylistRoute");
 const orderRoute = require("./routes/orderRoute");
-
+const transactionRoute = require("./routes/transactionRoute");
+const notificationRoute = require("./routes/notificationRoute");
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
 const errorHandlerMiddleware = require("./middleware/error-handler");
@@ -56,13 +57,13 @@ app.use(express.static("public"));
 
 // Home route for documentation
 app.get("/", (req, res) => {
-  res.send("Welcome to AfrikanWears API");
+  res.send("Welcome to AfriWears API");
 });
 
 // CORS setup
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
+  "http://localhost:5000",
   "http://localhost:3000",
-  "https://accounts.google.com",
 ];
 app.use(
   cors({
@@ -158,6 +159,8 @@ app.use("/api/cart", apiLimiter, cartRouter);
 app.use("/api/messages", apiLimiter, messageRouter);
 app.use("/api/stylists", apiLimiter, stylistRouter);
 app.use("/api/orders", apiLimiter, orderRoute);
+app.use("/api/transactions", apiLimiter, transactionRoute);
+app.use("/api/notifications", apiLimiter, notificationRoute);
 // Error handling middleware
 app.use(notFoundMiddleware);
 app.use(errorHandlerMiddleware);

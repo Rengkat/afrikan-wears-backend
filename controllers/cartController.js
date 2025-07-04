@@ -14,7 +14,6 @@ const addToCart = async (req, res, next) => {
     const userId = req.user.id;
 
     if (!productId || !quantity) {
-      // Removed price check here
       throw new CustomError.BadRequestError("Please provide product ID and quantity");
     }
 
@@ -168,13 +167,13 @@ const removeFromCart = async (req, res, next) => {
     session.endSession();
   }
 };
-
 const updateCart = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { productId, quantity } = req.body;
+    const { productId } = req.params;
+    const { quantity } = req.body;
     const userId = req.user.id;
 
     if (!productId || !quantity) {
@@ -189,11 +188,13 @@ const updateCart = async (req, res, next) => {
       throw new CustomError.BadRequestError("Quantity must be greater than 0");
     }
 
-    const cart = await Cart.findById({ user: userId }).session(session);
+    const cart = await Cart.findOne({ user: userId }).session(session);
     const product = await Product.findById(productId).session(session);
+
     if (product.stock < quantity) {
       throw new CustomError.BadRequestError(`Only ${product.stock} items available`);
     }
+
     if (!cart) {
       throw new CustomError.NotFoundError("Cart not found");
     }
@@ -207,7 +208,6 @@ const updateCart = async (req, res, next) => {
     cart.items[itemIndex].quantity = quantity;
     await cart.save({ session });
     await session.commitTransaction();
-    // Clear the user's cart cache
     await clearCache(`cart:${userId}`);
     res.status(StatusCodes.OK).json({
       success: true,

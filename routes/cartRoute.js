@@ -5,6 +5,7 @@ const {
   removeFromCart,
   updateCart,
   getAllCartProducts,
+  clearCart,
 } = require("../controllers/cartController");
 const { authenticateUser, restrictToUser } = require("../middleware/authentication");
 
@@ -12,6 +13,7 @@ router
   .route("/")
   .post(authenticateUser, restrictToUser("user"), addToCart)
   .get(authenticateUser, restrictToUser("user"), getAllCartProducts);
+router.post("/clear-cart", authenticateUser, clearCart);
 router
   .route("/:id")
   .delete(authenticateUser, restrictToUser("user"), removeFromCart)

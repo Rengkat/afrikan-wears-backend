@@ -2,36 +2,51 @@ const Stylist = require("../models/stylistModel");
 const User = require("../models/userModel");
 const { StatusCodes } = require("http-status-codes");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
-
+const fs = require("fs").promises;
 const CustomError = require("../errors");
 const mongoose = require("mongoose");
+const { writeClient } = require("../utils");
 const addStylist = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { name, description, owner, location } = req.body;
+    const { company, description, owner, specialty, services, phone, location } = req.body;
 
-    if (!name || !owner || !mongoose.Types.ObjectId.isValid(owner)) {
-      throw new CustomError.BadRequestError("Provide valid name and owner ID");
+    // Validate required fields
+    if (
+      !company ||
+      !owner ||
+      !specialty ||
+      !services?.length ||
+      !phone ||
+      !location?.state ||
+      !location?.address
+    ) {
+      throw new CustomError.BadRequestError(
+        "Provide company, owner ID, specialty, services, phone, and full location (state + address)"
+      );
     }
 
     // Check if stylist exists (case-insensitive)
     const existingStylist = await Stylist.findOne({
-      name: { $regex: new RegExp(`^${name}$`, "i") },
+      company: { $regex: new RegExp(`^${company}$`, "i") },
     }).session(session);
 
     if (existingStylist) {
-      throw new CustomError.BadRequestError("Stylist name already exists");
+      throw new CustomError.BadRequestError("Company name already exists");
     }
 
     // Create stylist
     const stylist = await Stylist.create(
       [
         {
-          name,
+          company,
           description,
           owner,
+          specialty,
+          services,
+          phone,
           location,
         },
       ],
@@ -49,7 +64,6 @@ const addStylist = async (req, res, next) => {
     await user.save({ session });
 
     await session.commitTransaction();
-    //clear stylist cache as a new stylist is added
     await clearCache("stylist:*");
     res.status(StatusCodes.CREATED).json({
       success: true,
@@ -64,9 +78,10 @@ const addStylist = async (req, res, next) => {
 };
 const getAllStylists = async (req, res, next) => {
   try {
-    const { name, page = 1, limit = 10 } = req.query;
-    const cacheKey = `stylist:${name || ""}:${page}:${limit}`;
-    //get from cache first
+    const { company, specialty, page = 1, limit = 10 } = req.query;
+    const cacheKey = `stylist:${company || ""}:${specialty || ""}:${page}:${limit}`;
+
+    // Check cache
     const cachedData = await getFromCache(cacheKey);
     if (cachedData) {
       return res.status(StatusCodes.OK).json({
@@ -75,16 +90,26 @@ const getAllStylists = async (req, res, next) => {
         ...cachedData,
       });
     }
-    const query = {};
 
-    if (name) {
-      query.name = { $regex: name, $options: "i" };
+    // Build query
+    const query = {};
+    if (company) {
+      query.company = { $regex: company, $options: "i" };
     }
-    const skip = (page - 1) * limit;
+    if (specialty) {
+      query.specialty = { $regex: specialty, $options: "i" };
+    }
+
+    // Fetch data
     const [stylists, total] = await Promise.all([
-      Stylist.find(query).skip(skip).limit(limit).lean(),
+      Stylist.find(query)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
       Stylist.countDocuments(query),
     ]);
+
+    // Cache and respond
     const responseData = {
       count: stylists.length,
       total,
@@ -92,8 +117,8 @@ const getAllStylists = async (req, res, next) => {
       pages: Math.ceil(total / limit),
       stylists,
     };
-    //Cache the response for 1 hour
     await setInCache(cacheKey, responseData);
+
     res.status(StatusCodes.OK).json({
       success: true,
       fromCache: false,
@@ -138,37 +163,112 @@ const updateStylist = async (req, res, next) => {
 
   try {
     const { id } = req.params;
-    const { name, description, location } = req.body;
+    const updateData = req.body;
+    const { role, company } = req.user;
+
+    // Admin can update any stylist, stylist can only update their own company
+    if (role === "stylist" && company.toString() !== id) {
+      throw new CustomError.UnauthorizedError("You can only update your own company");
+    }
 
     const stylist = await Stylist.findById(id).session(session);
     if (!stylist) {
       throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
 
-    // Case-insensitive name conflict check (excluding current stylist)
-    if (name) {
+    // Admin-only fields
+    if (role !== "admin") {
+      delete updateData.rating;
+      delete updateData.reviews;
+      delete updateData.owner;
+    }
+
+    // Update fields
+    const allowedUpdates = [
+      "companyName",
+      "description",
+      "specialty",
+      "experience",
+      "services",
+      "phone",
+      "email",
+      "website",
+      "socialMedia",
+      "location",
+    ];
+
+    allowedUpdates.forEach((field) => {
+      if (updateData[field] !== undefined) {
+        stylist[field] = updateData[field];
+      }
+    });
+
+    // Case-insensitive name conflict check
+    if (updateData.companyName) {
       const nameExists = await Stylist.findOne({
-        name: { $regex: new RegExp(`^${name}$`, "i") },
+        companyName: { $regex: new RegExp(`^${updateData.companyName}$`, "i") },
         _id: { $ne: id },
       }).session(session);
 
       if (nameExists) {
-        throw new CustomError.BadRequestError("Stylist name already exists");
+        throw new CustomError.BadRequestError("Company name already exists");
       }
-      stylist.name = name;
     }
-
-    if (description) stylist.description = description;
-    if (location) stylist.location = location;
 
     await stylist.save({ session });
     await session.commitTransaction();
-    // clear both the specific stylist cache and the stylist cache
-    await Promise.all([clearCache(`stylist:${id}`), clearCache(`stylist:*`)]);
+
+    // Clear cache
+    await Promise.all([clearCache(`stylist:${id}`), clearCache("stylist:*")]);
+
     res.status(StatusCodes.OK).json({
       success: true,
       stylist,
-      message: "Updated successfully",
+      message: "Stylist updated successfully",
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
+
+const updateStylistProfile = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const { role, company } = req.user;
+    const { description, specialty, services, experience } = req.body;
+
+    // Only allow stylist to update their own profile
+    if (role !== "stylist" || company.toString() !== id) {
+      throw new CustomError.UnauthorizedError("You can only update your own profile");
+    }
+
+    const stylist = await Stylist.findById(id).session(session);
+    if (!stylist) {
+      throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
+    }
+
+    // Update only profile-related fields
+    if (description) stylist.description = description;
+    if (specialty) stylist.specialty = specialty;
+    if (services) stylist.services = services;
+    if (experience) stylist.experience = experience;
+
+    await stylist.save({ session });
+    await session.commitTransaction();
+
+    // Clear cache
+    await Promise.all([clearCache(`stylist:${id}`), clearCache("stylist:*")]);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      stylist,
+      message: "Profile updated successfully",
     });
   } catch (error) {
     await session.abortTransaction();
@@ -216,11 +316,256 @@ const deleteStylist = async (req, res, next) => {
     session.endSession();
   }
 };
+/// images
+const uploadStylistAvatar = async (req, res, next) => {
+  let tempFilePath = null;
+
+  try {
+    const { id } = req.params;
+    const { role, company } = req.user;
+
+    if (role === "stylist" && company.toString() !== id) {
+      throw new CustomError.UnauthorizedError("You can only update your own avatar");
+    }
+
+    if (!req.files?.avatar) {
+      throw new CustomError.BadRequestError("Avatar image is required");
+    }
+
+    const avatarFile = req.files.avatar;
+    tempFilePath = avatarFile.tempFilePath;
+    const fileBuffer = await fs.readFile(tempFilePath);
+
+    // Upload to Sanity
+    const uploadResult = await writeClient.assets.upload("image", fileBuffer, {
+      filename: avatarFile.name,
+      contentType: avatarFile.mimetype,
+    });
+
+    // Create reference document
+    const doc = await writeClient.create({
+      _type: "imageStorage",
+      image: {
+        _type: "image",
+        asset: {
+          _type: "reference",
+          _ref: uploadResult._id,
+        },
+      },
+    });
+
+    const imageUrl = `${uploadResult.url}?w=200&h=200&fit=crop`; // Square crop for avatar
+
+    // Update stylist with new avatar URL
+    const stylist = await Stylist.findByIdAndUpdate(id, { avatar: imageUrl }, { new: true });
+
+    await clearCache(`stylist:${id}`);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      avatar: stylist.avatar,
+      documentId: doc._id,
+      message: "Avatar updated successfully",
+    });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (e) {
+        console.error("Error deleting temp file:", e);
+      }
+    }
+  }
+};
+
+const uploadStylistBanner = async (req, res, next) => {
+  let tempFilePath = null;
+
+  try {
+    const { id } = req.params;
+    const { role, company } = req.user;
+
+    if (role === "stylist" && company.toString() !== id) {
+      throw new CustomError.UnauthorizedError("You can only update your own banner");
+    }
+
+    if (!req.files?.banner) {
+      throw new CustomError.BadRequestError("Banner image is required");
+    }
+
+    const bannerFile = req.files.banner;
+    tempFilePath = bannerFile.tempFilePath;
+    const fileBuffer = await fs.readFile(tempFilePath);
+
+    // Upload to Sanity
+    const uploadResult = await writeClient.assets.upload("image", fileBuffer, {
+      filename: bannerFile.name,
+      contentType: bannerFile.mimetype,
+    });
+
+    // Create reference document
+    const doc = await writeClient.create({
+      _type: "imageStorage",
+      image: {
+        _type: "image",
+        asset: {
+          _type: "reference",
+          _ref: uploadResult._id,
+        },
+      },
+    });
+
+    const imageUrl = `${uploadResult.url}?w=1200&h=400&fit=crop`; // Wide crop for banner
+
+    // Update stylist with new banner URL
+    const stylist = await Stylist.findByIdAndUpdate(id, { banner: imageUrl }, { new: true });
+
+    await clearCache(`stylist:${id}`);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      banner: stylist.banner,
+      documentId: doc._id,
+      message: "Banner updated successfully",
+    });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (e) {
+        console.error("Error deleting temp file:", e);
+      }
+    }
+  }
+};
+
+const addPortfolioImage = async (req, res, next) => {
+  let tempFilePath = null;
+
+  try {
+    const { id } = req.params;
+    const { role, company } = req.user;
+    const { category } = req.body;
+
+    if (role === "stylist" && company.toString() !== id) {
+      throw new CustomError.UnauthorizedError("You can only update your own portfolio");
+    }
+
+    if (!req.files?.image) {
+      throw new CustomError.BadRequestError("Portfolio image is required");
+    }
+
+    if (!category) {
+      throw new CustomError.BadRequestError("Category is required");
+    }
+
+    const imageFile = req.files.image;
+    tempFilePath = imageFile.tempFilePath;
+    const fileBuffer = await fs.readFile(tempFilePath);
+
+    // Upload to Sanity
+    const uploadResult = await writeClient.assets.upload("image", fileBuffer, {
+      filename: imageFile.name,
+      contentType: imageFile.mimetype,
+    });
+
+    // Create reference document
+    const doc = await writeClient.create({
+      _type: "imageStorage",
+      image: {
+        _type: "image",
+        asset: {
+          _type: "reference",
+          _ref: uploadResult._id,
+        },
+      },
+    });
+
+    const imageUrl = `${uploadResult.url}?w=800&h=800&fit=max`; // High quality for portfolio
+
+    // Add to stylist's portfolio
+    const stylist = await Stylist.findByIdAndUpdate(
+      id,
+      {
+        $push: {
+          portfolio: {
+            image: imageUrl,
+            category,
+            sanityRef: doc._id, // Store Sanity document reference
+          },
+        },
+      },
+      { new: true }
+    );
+
+    await clearCache(`stylist:${id}`);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      portfolio: stylist.portfolio,
+      documentId: doc._id,
+      message: "Portfolio image added successfully",
+    });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (e) {
+        console.error("Error deleting temp file:", e);
+      }
+    }
+  }
+};
+
+const removePortfolioImage = async (req, res, next) => {
+  try {
+    const { id, imageId } = req.params;
+    const { role, company } = req.user;
+
+    if (role === "stylist" && company.toString() !== id) {
+      throw new CustomError.UnauthorizedError("You can only update your own portfolio");
+    }
+
+    // First get the image to be removed
+    const stylist = await Stylist.findById(id);
+    const portfolioItem = stylist.portfolio.id(imageId);
+
+    if (!portfolioItem) {
+      throw new CustomError.NotFoundError("Portfolio image not found");
+    }
+
+    // Delete from Sanity (optional - you might want to keep assets)
+    await writeClient.delete(portfolioItem.sanityRef);
+
+    // Remove from portfolio array
+    await Stylist.findByIdAndUpdate(id, { $pull: { portfolio: { _id: imageId } } }, { new: true });
+
+    await clearCache(`stylist:${id}`);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Portfolio image removed successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 module.exports = {
   addStylist,
   getAllStylists,
   getSingleStylist,
   updateStylist,
+  updateStylistProfile,
   deleteStylist,
+  removePortfolioImage,
+  addPortfolioImage,
+  uploadStylistAvatar,
+  uploadStylistBanner,
 };

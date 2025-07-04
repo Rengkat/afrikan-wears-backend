@@ -4,113 +4,9 @@ const ProductSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, "Provide product name"],
+      required: [true, "Product name is required"],
       trim: true,
-      maxlength: [100, "Product name cannot exceed 100 characters"],
-    },
-    price: {
-      type: Number,
-      required: [true, "Provide product price"],
-      min: [0, "Price cannot be negative"],
-      set: (v) => Math.round(v * 100) / 100, // Round to 2 decimal places
-    },
-    mainImage: {
-      type: String,
-      required: [true, "Please provide product image URL"],
-      validate: {
-        validator: function (v) {
-          return /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(v);
-        },
-        message: (props) => `${props.value} is not a valid URL!`,
-      },
-    },
-    subImages: {
-      type: [String],
-      validate: {
-        validator: function (v) {
-          return v.every((url) => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(url));
-        },
-        message: (props) => `Invalid URL found in subImages!`,
-      },
-    },
-    sku: {
-      type: String,
-      required: [true, "Provide product SKU"],
-      unique: true,
-      uppercase: true,
-    },
-    description: {
-      type: String,
-      required: [true, "Provide product description"],
-      trim: true,
-      maxlength: [1000, "Description cannot exceed 1000 characters"],
-    },
-    category: {
-      type: String,
-      enum: ["all", "men corporate", "women corporate", "men native", "female native"],
-      required: [true, "Provide product category"],
-    },
-    size: {
-      type: String,
-      enum: ["normal", "xl", "xxl"],
-      default: "normal",
-    },
-    stylist: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Stylist",
-      required: true,
-    },
-    stock: {
-      type: Number,
-      required: [true, "Provide product stock quantity"],
-      min: [0, "Stock cannot be negative"],
-    },
-    rating: {
-      type: Number,
-      default: 0,
-      min: [0, "Rating cannot be less than 0"],
-      max: [5, "Rating cannot be more than 5"],
-      set: (v) => Math.round(v * 10) / 10, // Round to 1 decimal place
-    },
-    reviews: {
-      type: [
-        {
-          user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-          rating: { type: Number, required: true, min: 0, max: 5 },
-          comment: { type: String, trim: true, maxlength: 500 },
-          createdAt: { type: Date, default: Date.now },
-        },
-      ],
-      default: [],
-    },
-    featured: {
-      type: Boolean,
-      default: false,
-    },
-    isAdminApproved: {
-      type: Boolean,
-      default: false,
-    },
-
-    createdBy: {
-      type: String,
-      enum: ["admin", "stylist"],
-      required: true,
-    },
-    status: {
-      type: String,
-      enum: ["pending", "approved", "rejected"],
-      default: "pending",
-    },
-    rejectionReason: {
-      type: String,
-      trim: true,
-      maxlength: [500, "Rejection reason cannot exceed 500 characters"],
-    },
-
-    approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      maxlength: [100, "Name cannot exceed 100 characters"],
     },
     slug: {
       type: String,
@@ -118,10 +14,125 @@ const ProductSchema = new mongoose.Schema(
       lowercase: true,
       index: true,
     },
+    description: {
+      type: String,
+      required: [true, "Description is required"],
+      maxlength: [1000, "Description too long"],
+    },
+    productDetails: String,
+    materials: String,
+    careInstructions: String,
+    deliveryInfo: String,
+
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    originalPrice: Number,
+    minPrice: Number,
+    maxPrice: Number,
+
+    // Media
+    mainImage: {
+      type: String,
+      required: true,
+      validate: {
+        validator: (v) => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(v),
+        message: (props) => `${props.value} is not a valid URL!`,
+      },
+    },
+    subImages: [
+      {
+        type: String,
+        validate: {
+          validator: (v) => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(v),
+          message: "Invalid image URL",
+        },
+      },
+    ],
+
+    // Variants
+    sizes: [String],
+    colors: [String],
     attributes: {
-      // For product variants (size, color, etc.)
       type: Map,
       of: String,
+    },
+
+    // Relationships
+    stylist: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Stylist",
+      required: true,
+    },
+    stylistName: String,
+
+    // Reviews & Ratings
+    rating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
+    reviews: [
+      {
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        name: String,
+        rating: { type: Number, required: true, min: 0, max: 5 },
+        comment: String,
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    reviewCount: {
+      type: Number,
+      default: 0,
+    },
+
+    // Flags
+    isBestSeller: Boolean,
+    isNewProduct: Boolean,
+    featured: Boolean,
+    isAdminApproved: {
+      type: Boolean,
+      default: false,
+    },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    rejectionReason: String,
+
+    // Inventory
+    stock: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    sku: {
+      type: String,
+      unique: true,
+      uppercase: true,
+    },
+
+    category: {
+      type: String,
+      enum: ["men", "women", "unisex"],
+      required: true,
+    },
+    type: {
+      type: String,
+      enum: ["native", "corporate", "casual", "traditional"],
+      required: true,
+    },
+    tags: [String],
+
+    // Status
+    status: {
+      type: String,
+      enum: ["draft", "published", "archived"],
+      default: "draft",
     },
   },
   {
@@ -134,21 +145,17 @@ const ProductSchema = new mongoose.Schema(
 // Auto-generate slug
 ProductSchema.pre("save", function (next) {
   if (!this.slug) {
-    this.slug = `${this.name.toLowerCase().replace(/\s+/g, "-")}-${this.sku.toLowerCase()}`;
+    this.slug = this.name.toLowerCase().replace(/\s+/g, "-");
   }
   next();
 });
 
-// Virtual for average rating (calculated on-the-fly)
-ProductSchema.virtual("averageRating").get(function () {
-  if (!this.reviews || this.reviews.length === 0) return 0; // Handle undefined/null
-  const sum = this.reviews.reduce((acc, review) => acc + review.rating, 0);
-  return Math.round((sum / this.reviews.length) * 10) / 10; // Round to 1 decimal
-});
+// Indexes
+ProductSchema.index({ name: "text", description: "text" });
 ProductSchema.index({ price: 1 });
 ProductSchema.index({ rating: -1 });
-ProductSchema.index({ featured: 1 });
-ProductSchema.index({ brand: 1 });
-ProductSchema.index({ category: 1 });
+ProductSchema.index({ isBestSeller: 1 });
+ProductSchema.index({ isNew: 1 });
+ProductSchema.index({ stylist: 1 });
 
 module.exports = mongoose.model("Product", ProductSchema);

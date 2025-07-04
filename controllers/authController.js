@@ -2,7 +2,7 @@ const User = require("../models/userModel");
 const CustomError = require("../errors");
 const Token = require("../models/tokenModel");
 const Stylist = require("../models/stylistModel");
-const { attachTokenToResponse, createUserPayload } = require("../utils");
+const { attachTokenToResponse, createUserPayload, isTokenVerified } = require("../utils");
 const sendResetPasswordEmail = require("../utils/email/sendResetPasswordEmail");
 const crypto = require("crypto");
 const sendVerificationEmail = require("../utils/Email/sendVerificationMail");
@@ -10,10 +10,10 @@ const { StatusCodes } = require("http-status-codes");
 const { clearCache } = require("../utils/redisClient");
 const register = async (req, res, next) => {
   try {
-    const { name, email, password, companyName } = req.body;
+    const { firstName, surname, email, password, companyName } = req.body;
 
     // check if details are present
-    if (!name || !email || !password) {
+    if (!firstName || !surname || !email || !password) {
       throw new CustomError.BadRequestError("Please provide all credentials");
     }
 
@@ -34,13 +34,14 @@ const register = async (req, res, next) => {
     // If companyName is provided, create the stylist first
     if (companyName) {
       company = await Stylist.create({
-        name: companyName,
-        description: `${name}'s styling company`,
+        companyName: companyName,
+        description: `${firstName} ${surname}'s styling company`,
       });
     }
 
     const user = await User.create({
-      name,
+      firstName,
+      surname,
       email,
       password,
       company: company?._id || null,
@@ -59,7 +60,7 @@ const register = async (req, res, next) => {
     sendVerificationEmail({
       email: user.email,
       origin: process.env.ORIGIN,
-      name: user.name,
+      name: user.firstName,
       verificationToken,
     });
 
@@ -68,11 +69,62 @@ const register = async (req, res, next) => {
       success: true,
       user: {
         _id: user._id,
-        name: user.name,
+        firstName: user.firstName,
+        surname: user.surname,
         email: user.email,
         role: user.role,
         company: company || null,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+const resendVerificationEmail = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new CustomError.BadRequestError("Please provide email");
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      throw new CustomError.NotFoundError("No user found with this email");
+    }
+
+    if (user.isVerified) {
+      throw new CustomError.BadRequestError("Email is already verified");
+    }
+
+    // Generate new verification token
+    const verificationToken = crypto.randomBytes(40).toString("hex");
+    const expiration = new Date(Date.now() + 1000 * 60 * 60);
+
+    user.verificationToken = verificationToken;
+    user.verificationTokenExpirationDate = expiration;
+    await user.save();
+
+    // Send verification email
+    await sendVerificationEmail({
+      email: user.email,
+      origin: process.env.ORIGIN,
+      name: user.firstName,
+      verificationToken,
+    });
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Verification email sent successfully",
+      // Optionally include these for debugging (remove in production)
+      debug:
+        process.env.NODE_ENV === "development"
+          ? {
+              verificationToken,
+              expiresAt: expiration,
+            }
+          : undefined,
     });
   } catch (error) {
     next(error);
@@ -117,6 +169,7 @@ const verifyEmail = async (req, res, next) => {
     next(error);
   }
 };
+
 const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -174,21 +227,34 @@ const login = async (req, res, next) => {
     next(error);
   }
 };
-const googleAuth = async (req, res, next) => {
+const getCurrentUser = async (req, res, next) => {
   try {
-    if (!req.user) {
-      throw new CustomError.UnauthenticatedError("Google authentication failed");
+    const userId = req.user.id;
+
+    // Add population if you need related data (like company info)
+    const user = await User.findById(userId)
+      .select("-password -verificationToken -verificationTokenExpirationDate -__v")
+      .populate({
+        path: "company",
+        select: "companyName description",
+      });
+
+    if (!user) {
+      throw new CustomError.NotFoundError("User not found");
     }
-
-    const { refreshToken, ...userPayload } = req.user;
-
-    // Attach tokens to response
-    attachTokenToResponse({ res, userPayload, refreshToken });
 
     res.status(StatusCodes.OK).json({
       success: true,
-      user: userPayload,
-      message: "Logged in successfully with Google",
+      user: {
+        id: user._id,
+        firstName: user.firstName,
+        surname: user.surname,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+        company: user.company || null,
+        avatar: user.avatar,
+      },
     });
   } catch (error) {
     next(error);
@@ -242,7 +308,7 @@ const forgotPassword = async (req, res, next) => {
         email: user.email,
         origin: process.env.ORIGIN,
         verificationToken: user.verificationToken,
-        name: user.name,
+        name: user.firstName,
       });
     }
     res
@@ -277,12 +343,83 @@ const resetPassword = async (req, res, next) => {
     next(error);
   }
 };
+const refreshTokens = async (req, res, next) => {
+  try {
+    const { refreshToken: incomingRefreshToken } = req.signedCookies;
+
+    if (!incomingRefreshToken) {
+      throw new CustomError.UnauthenticatedError("No refresh token provided");
+    }
+
+    // 2. Verify the JWT refresh token
+    let payload;
+    try {
+      payload = isTokenVerified(incomingRefreshToken);
+    } catch (jwtError) {
+      throw new CustomError.UnauthenticatedError("Invalid or expired refresh token");
+    }
+
+    // 3. Find the matching token in database
+    const existingToken = await Token.findOne({
+      user: payload.accessToken.id,
+      refreshToken: payload.refreshToken,
+      isValid: true,
+    });
+
+    if (!existingToken) {
+      throw new CustomError.UnauthenticatedError("Invalid session - token not found");
+    }
+
+    // 4. Get the associated user
+    const user = await User.findById(payload.accessToken.id);
+    if (!user) {
+      throw new CustomError.NotFoundError("User not found");
+    }
+
+    // 5. Rotate refresh token (generate new one, invalidate old)
+    const newRefreshToken = crypto.randomBytes(40).toString("hex");
+    existingToken.refreshToken = newRefreshToken;
+    await existingToken.save();
+
+    // 6. Create and attach new tokens
+    const userPayload = createUserPayload(user);
+    attachTokenToResponse({
+      res,
+      userPayload,
+      refreshToken: newRefreshToken,
+    });
+
+    // 7. Return success response with user data
+    res.status(StatusCodes.OK).json({
+      success: true,
+      user: userPayload,
+      message: "Tokens refreshed successfully",
+    });
+  } catch (error) {
+    // Clear cookies on any error
+    res.cookie("accessToken", "logout", {
+      httpOnly: true,
+      expires: new Date(Date.now()),
+      secure: process.env.NODE_ENV === "production",
+    });
+    res.cookie("refreshToken", "logout", {
+      httpOnly: true,
+      expires: new Date(Date.now()),
+      secure: process.env.NODE_ENV === "production",
+    });
+
+    next(error);
+  }
+};
 module.exports = {
   register,
+  resendVerificationEmail,
   verifyEmail,
   login,
-  googleAuth,
+  getCurrentUser,
+  // googleAuth,
   logout,
   forgotPassword,
   resetPassword,
+  refreshTokens,
 };

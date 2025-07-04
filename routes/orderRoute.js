@@ -31,12 +31,9 @@ router.get(
   adminAndStylistAuthorization("stylist"),
   getStylistOrders
 );
-router.post("/balance-payment/:orderId", authenticateUser, completeCustomOrderPayment);
+router.post("/:orderId/complete-payment", authenticateUser, completeCustomOrderPayment);
 router.post("/:orderId/verify-payment", authenticateUser, verifyPayment);
 router.get("/:id", authenticateUser, getSingleOrder);
-// router.get("/me", authenticateUser, getMyOrders);
-
-// // Stylist routes
 
 router.patch(
   "/:id/status",

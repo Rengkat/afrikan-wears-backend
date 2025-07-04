@@ -2,48 +2,104 @@ const mongoose = require("mongoose");
 
 const StylistSchema = new mongoose.Schema(
   {
-    name: {
+    companyName: {
       type: String,
-      required: [true, "Provide category name"],
+      required: [true, "Company name is required"],
       trim: true,
       unique: true,
-      maxlength: [50, "Category name cannot exceed 50 characters"],
+      maxlength: [100, "Company name cannot exceed 100 characters"],
     },
     description: {
       type: String,
       trim: true,
-      maxlength: [200, "Description cannot exceed 200 characters"],
+      maxlength: [500, "Description cannot exceed 500 characters"],
     },
-    owner: { type: mongoose.Types.ObjectId, ref: "User" },
+    specialty: {
+      type: String,
+      trim: true,
+    },
+    experience: {
+      type: String,
+      default: "0 years",
+    },
+    rating: {
+      type: Number,
+      default: 0,
+      min: [0, "Rating cannot be negative"],
+      max: [5, "Rating cannot exceed 5"],
+    },
+    reviews: {
+      type: Number,
+      default: 0,
+    },
+    services: {
+      type: [String],
+    },
+
+    phone: {
+      type: String,
+      trim: true,
+    },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+    website: {
+      type: String,
+      trim: true,
+    },
+    socialMedia: {
+      twitter: { type: String, trim: true },
+      facebook: { type: String, trim: true },
+      instagram: { type: String, trim: true },
+      pinterest: { type: String, trim: true },
+    },
+
+    // Location (expanded for flexibility)
+    location: {
+      state: { type: String },
+      lga: { type: String },
+      address: { type: String },
+      branches: { type: Number, default: 1 },
+    },
+
+    // Media
+    avatar: {
+      type: String, // URL to profile image
+      default: "/default-avatar.jpg",
+    },
+    banner: {
+      type: String, // URL to banner image
+      default: "/default-banner.jpg",
+    },
+    portfolio: [
+      {
+        image: { type: String, required: true }, // URL
+        category: { type: String, required: true },
+      },
+    ],
+
+    // References
+    owner: {
+      type: mongoose.Types.ObjectId,
+      ref: "User",
+      // required: true,
+    },
     slug: {
       type: String,
       unique: true,
       lowercase: true,
       index: true,
     },
-    location: {
-      state: {
-        type: String,
-      },
-      lga: {
-        type: String,
-      },
-      address: {
-        type: String,
-      },
-    },
   },
-  {
-    timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true },
-  }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
 // Auto-generate slug before saving
 StylistSchema.pre("save", function (next) {
   if (!this.slug) {
-    this.slug = this.name.toLowerCase().replace(/\s+/g, "-");
+    this.slug = this.companyName.toLowerCase().replace(/\s+/g, "-");
   }
   next();
 });

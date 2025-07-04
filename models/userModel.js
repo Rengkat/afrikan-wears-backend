@@ -15,12 +15,13 @@ const AddressSchema = new mongoose.Schema({
     required: true,
   },
   homeAddress: { type: String, required: true },
+  homeAddress2: { type: String },
+  isDefault: { type: Boolean, default: false },
 });
+
 const UserSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, "name can't be empty"],
-  },
+  firstName: { type: String, required: [true, "First name can't be empty"] },
+  surname: { type: String, required: [true, "Surname can't be empty"] },
   email: {
     type: String,
     required: [true, "Email can't be empty"],
@@ -29,6 +30,7 @@ const UserSchema = new mongoose.Schema({
       message: "Please provide a valid email",
     },
   },
+  phone: { type: String, required: false },
   password: {
     type: String,
     required: [true, "Password can't be empty"],
@@ -45,26 +47,14 @@ const UserSchema = new mongoose.Schema({
       message: "Enter a stronger password",
     },
   },
-  role: {
-    type: String,
-    default: "user",
-    enum: ["admin", "user", "stylist"],
-  },
-  company: {
-    type: mongoose.Types.ObjectId,
-    ref: "Stylist",
-    default: null,
-  },
-  googleId: {
-    type: String,
-    unique: true,
-    sparse: true,
-  },
-  addresses: {
-    type: [AddressSchema],
-    default: [],
-    required: false,
-  },
+  role: { type: String, default: "user", enum: ["admin", "user", "stylist"] },
+  company: { type: mongoose.Types.ObjectId, ref: "Stylist", default: null },
+  googleId: { type: String, unique: true, sparse: true },
+  addresses: { type: [AddressSchema], default: [] },
+  defaultDeliveryAddress: { type: Number, default: 0 },
+  walletAmount: { type: Number, default: 0 },
+  subscribedToNewsLetter: { type: Boolean, default: false },
+  avatar: { type: String, default: "/avatar.jpg" },
   isVerified: { type: Boolean, default: false },
   verificationToken: { type: String },
   verificationTokenExpirationDate: { type: String },

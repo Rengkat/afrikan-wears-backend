@@ -27,13 +27,22 @@ const addProduct = async (req, res, next) => {
       rating,
       featured,
       attributes,
+      type,
     } = req.body;
 
     // Get user info from auth middleware
     const { role, company, userId } = req.user;
 
     // Validate required fields
-    if (!name || !price || !category || !mainImage || !description || stock === undefined) {
+    if (
+      !name ||
+      !price ||
+      !category ||
+      !type ||
+      !mainImage ||
+      !description ||
+      stock === undefined
+    ) {
       throw new CustomError.BadRequestError("Please provide all required product details");
     }
 
@@ -64,6 +73,7 @@ const addProduct = async (req, res, next) => {
           stylist: stylistId,
           sku,
           category,
+          type,
           description,
           stock,
           rating: role === "admin" ? rating || 0 : 0,
@@ -213,12 +223,12 @@ const verifyProduct = async (req, res, next) => {
 const getAllProducts = async (req, res, next) => {
   try {
     const { role, company, userId } = req.user;
-    const { stylist, page = 1, name, limit = 10, category, featured, status } = req.query;
+    const { stylist, page = 1, name, limit = 10, category, type, featured, status } = req.query;
 
     // Create a unique cache key based on all parameters
     const cacheKey = `products:${role}:${userId}:${stylist || "all"}:${page}:${limit}:${
       name || ""
-    }:${category || ""}:${featured || ""}:${status || ""}`;
+    }:${category || ""}:${type || ""}:${featured || ""}:${status || ""}`;
 
     // get data from cache first
     const cachedData = await getFromCache(cacheKey);
@@ -252,6 +262,7 @@ const getAllProducts = async (req, res, next) => {
     }
     if (name) query.name = { $regex: name, $options: "i" };
     if (category) query.category = category;
+    if (type) query.type = type;
     if (featured) query.featured = featured === "true";
 
     // Status filter (especially useful for admin)
@@ -387,6 +398,7 @@ const updateProduct = async (req, res, next) => {
       "subImages",
       "description",
       "category",
+      "type",
       "stock",
       "rating",
       "featured",

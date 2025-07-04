@@ -6,7 +6,6 @@ const Cart = require("../models/cartModel");
 const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
 const mongoose = require("mongoose");
-const { emitMessageEvent } = require("../utils");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
 const { emitNotification } = require("../utils/socket");
 const sendPlacedOrderEmail = require("../utils/Email/sendOrderEmail");
@@ -83,6 +82,66 @@ const createOrder = async (req, res, next) => {
     const initialPayment = orderType === "custom" ? totalPrice * 0.6 : totalPrice;
     const balanceDue = orderType === "custom" ? totalPrice * 0.4 : 0;
 
+    // Handle different payment methods
+    let paymentStatus = "pending";
+    let amountPaid = 0;
+    let transactionId = null;
+    let authorizationUrl = null;
+
+    // Wallet payment logic
+    if (paymentMethod === "wallet") {
+      const user = await User.findById(userId).session(session);
+      if (!user) {
+        throw new CustomError.NotFoundError("User not found");
+      }
+
+      // Check if user has sufficient balance
+      if (user.walletBalance < initialPayment) {
+        throw new CustomError.BadRequestError("Insufficient wallet balance");
+      }
+
+      // Deduct from wallet
+      user.walletBalance -= initialPayment;
+      await user.save({ session });
+
+      paymentStatus = orderType === "custom" ? "partially_paid" : "completed";
+      amountPaid = initialPayment;
+      transactionId = `wallet-${Date.now()}`;
+    }
+    // Cash on delivery logic
+    else if (paymentMethod === "cash_on_delivery") {
+      // For custom orders with cash on delivery, we only allow it for final payment
+      if (orderType === "custom") {
+        throw new CustomError.BadRequestError(
+          "Cash on delivery is only available for final payment of custom orders"
+        );
+      }
+
+      paymentStatus = "pending";
+      amountPaid = 0;
+    }
+    // Online payment (Paystack)
+    else {
+      // Initialize Paystack payment
+      const paystackResponse = await paystack.transaction.initialize({
+        email: req.user.email,
+        amount: Math.round(initialPayment * 100),
+        callback_url: `${process.env.ORIGIN}/api/v1/orders/verify-payment?orderId=${order[0]._id}`,
+        metadata: {
+          order_id: order[0]._id.toString(),
+          customer_id: userId.toString(),
+          order_type: orderType,
+        },
+      });
+
+      if (!paystackResponse.status) {
+        throw new CustomError.BadRequestError("Payment initialization failed");
+      }
+
+      transactionId = paystackResponse.data.reference;
+      authorizationUrl = paystackResponse.data.authorization_url;
+    }
+
     // Create order with appropriate payment status
     const order = await Order.create(
       [
@@ -92,43 +151,23 @@ const createOrder = async (req, res, next) => {
           shippingAddress,
           paymentInfo: {
             paymentMethod,
-            paymentStatus: orderType === "custom" ? "partially_paid" : "pending",
-            amountPaid: orderType === "custom" ? initialPayment : 0,
+            paymentStatus,
+            amountPaid,
             balanceDue,
+            transactionId,
           },
           itemsPrice,
           taxPrice,
           shippingPrice,
           totalPrice,
-          orderStatus: "pending",
+          orderStatus: paymentStatus === "completed" ? "processing" : "pending",
         },
       ],
       { session }
     );
 
-    // Initialize Paystack payment
-    const paystackResponse = await paystack.transaction.initialize({
-      email: req.user.email,
-      amount: Math.round(initialPayment * 100),
-      callback_url: `${process.env.ORIGIN}/api/v1/orders/verify-payment?orderId=${order[0]._id}`,
-      metadata: {
-        order_id: order[0]._id.toString(),
-        customer_id: userId.toString(),
-        order_type: orderType,
-      },
-    });
-    // console.log(paystackResponse);
-    if (!paystackResponse.status) {
-      throw new CustomError.BadRequestError("Payment initialization failed");
-    }
-
-    // Update order with payment reference
-    order[0].paymentInfo.transactionId = paystackResponse.data.reference;
-    //log the order here to see the reference no
-    await order[0].save({ session });
-
-    // For standard orders, reduce stock immediately
-    if (orderType === "standard") {
+    // For standard orders and completed payments, reduce stock immediately
+    if (orderType === "standard" && paymentStatus === "completed") {
       await Promise.all(
         order[0].orderItems.map(async (item) => {
           const product = await Product.findById(item.product).session(session);
@@ -142,7 +181,7 @@ const createOrder = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json({
       success: true,
-      authorizationUrl: paystackResponse.data.authorization_url,
+      authorizationUrl,
       order: order[0],
     });
   } catch (error) {

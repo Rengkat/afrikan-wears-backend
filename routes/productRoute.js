@@ -2,7 +2,6 @@ const express = require("express");
 const {
   authenticateUser,
   adminAndStylistAuthorization,
-  stylistAuthorization,
   adminAuthorization,
 } = require("../middleware/authentication");
 const {
@@ -17,19 +16,29 @@ const {
   verifyProduct,
 } = require("../controllers/productController");
 const router = express.Router();
+
+// Public routes
+router.route("/").get(getAllProducts);
+router.route("/:productId").get(getDetailProduct);
+
+// Protected routes
 router
   .route("/")
-  .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), addProduct)
-  .get(getAllProducts);
+  .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), addProduct);
+
 router
   .route("/upload-product-image")
   .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), uploadProductImage);
+
 router
   .route("/:productId")
-  .get(getDetailProduct)
   .patch(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), updateProduct)
   .delete(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), deleteProduct);
-router.put("/verify/:productId", authenticateUser, adminAuthorization, verifyProduct);
+
+router.route("/verify/:productId").put(authenticateUser, adminAuthorization, verifyProduct);
+
+// Review routes
 router.route("/:productId/review").post(authenticateUser, addReview);
-router.route("/:productId/review/:reviewId").post(authenticateUser, updateReview);
+router.route("/:productId/review/:reviewId").patch(authenticateUser, updateReview);
+
 module.exports = router;

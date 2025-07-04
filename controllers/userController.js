@@ -1,9 +1,10 @@
 const User = require("../models/userModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
-const { setInCache, getFromCache } = require("../utils/redisClient");
+const { setInCache, getFromCache, clearCache } = require("../utils/redisClient");
 const mongoose = require("mongoose");
-
+const { writeClient } = require("../utils");
+const fs = require("fs").promises;
 const getAllUsers = async (req, res, next) => {
   try {
     const { name, page = 1, limit = 10 } = req.query;
@@ -22,7 +23,10 @@ const getAllUsers = async (req, res, next) => {
     // Build query
     const query = {};
     if (name) {
-      query.name = { $regex: name, $options: "i" };
+      query.$or = [
+        { firstName: { $regex: name, $options: "i" } },
+        { surname: { $regex: name, $options: "i" } },
+      ];
     }
 
     // Execute queries in parallel
@@ -119,9 +123,12 @@ const getMyProfile = async (req, res, next) => {
 };
 const updateCurrentUser = async (req, res, next) => {
   const session = await mongoose.startSession();
+  let transactionFailed = false;
+
   try {
     session.startTransaction();
-    const { name, address } = req.body;
+    const { firstName, surname, phone, walletAmount, subscribedToNewsLetter, address, avatar } =
+      req.body;
     const userId = req.user.id;
 
     const user = await User.findById(userId)
@@ -132,12 +139,14 @@ const updateCurrentUser = async (req, res, next) => {
       throw new CustomError.NotFoundError("User not found");
     }
 
-    // Update name if provided
-    if (name) {
-      if (typeof name !== "string" || name.trim().length < 2) {
-        throw new CustomError.BadRequestError("Name must be at least 2 characters");
-      }
-      user.name = name.trim();
+    // Update basic fields
+    if (firstName) user.firstName = firstName.trim();
+    if (avatar) user.avatar = avatar;
+    if (surname) user.surname = surname.trim();
+    if (phone) user.phone = phone;
+    if (walletAmount !== undefined) user.walletAmount = walletAmount;
+    if (subscribedToNewsLetter !== undefined) {
+      user.subscribedToNewsLetter = subscribedToNewsLetter;
     }
 
     // Handle address addition
@@ -151,7 +160,6 @@ const updateCurrentUser = async (req, res, next) => {
         );
       }
 
-      // Check for duplicates
       const isDuplicate = user.addresses.some((existingAddr) =>
         requiredFields.every(
           (field) =>
@@ -165,8 +173,6 @@ const updateCurrentUser = async (req, res, next) => {
       }
 
       user.addresses.push(address);
-
-      // Limit to 5 most recent addresses
       if (user.addresses.length > 5) {
         user.addresses = user.addresses.slice(-5);
       }
@@ -175,16 +181,18 @@ const updateCurrentUser = async (req, res, next) => {
     await user.save({ session });
     await session.commitTransaction();
 
-    const userResponse = user.toObject();
-    delete userResponse.verificationTokenExpirationDate;
-    await Promise.all([clearCache(`users:${id}`), clearCache(`users:*`)]);
+    // Clear relevant cache entries
+    await Promise.all([clearCache(`users:${userId}`), clearCache(`users:*`)]);
 
     res.status(StatusCodes.OK).json({
       success: true,
-      user: userResponse,
+      user: user.toObject(),
     });
   } catch (error) {
-    await session.abortTransaction();
+    transactionFailed = true;
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     next(error);
   } finally {
     session.endSession();
@@ -196,7 +204,7 @@ const updateUser = async (req, res, next) => {
   try {
     session.startTransaction();
     const { id } = req.params;
-    const { name, email, role, addresses } = req.body;
+    const { firstName, surname, email, role, addresses } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw new CustomError.BadRequestError("Invalid user ID format");
@@ -211,12 +219,8 @@ const updateUser = async (req, res, next) => {
     }
 
     // Validate and update fields
-    if (name) {
-      if (typeof name !== "string" || name.trim().length < 2) {
-        throw new CustomError.BadRequestError("Name must be at least 2 characters");
-      }
-      user.name = name.trim();
-    }
+    if (firstName) user.firstName = firstName.trim();
+    if (surname) user.surname = surname.trim();
 
     if (email) {
       if (!validator.isEmail(email)) {
@@ -287,6 +291,55 @@ const deleteUser = async (req, res, next) => {
     session.endSession();
   }
 };
+const uploadAvatar = async (req, res, next) => {
+  let tempFilePath = null;
+  try {
+    if (!req.files?.avatar) {
+      throw new CustomError.BadRequestError("Avatar image is required");
+    }
+
+    const avatarFile = req.files.avatar;
+
+    tempFilePath = avatarFile.tempFilePath;
+    const fileBuffer = await fs.readFile(tempFilePath);
+
+    // Upload to Sanity
+    const uploadResult = await writeClient.assets.upload("image", fileBuffer, {
+      filename: avatarFile.name,
+      contentType: avatarFile.mimetype,
+    });
+
+    // Create reference document
+    const doc = await writeClient.create({
+      _type: "imageStorage",
+      image: {
+        _type: "image",
+        asset: {
+          _type: "reference",
+          _ref: uploadResult._id,
+        },
+      },
+    });
+
+    const imageUrl = `${uploadResult.url}?w=200&h=200&fit=crop`; // Square crop for avatar
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      imageUrl,
+      message: "Avatar uploaded successfully",
+    });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (e) {
+        console.error("Error deleting temp file:", e);
+      }
+    }
+  }
+};
 
 module.exports = {
   getAllUsers,
@@ -295,4 +348,5 @@ module.exports = {
   updateUser,
   deleteUser,
   getMyProfile,
+  uploadAvatar,
 };
