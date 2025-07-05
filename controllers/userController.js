@@ -66,22 +66,34 @@ const getDetailUser = async (req, res, next) => {
     const { id } = req.params;
     const cacheKey = `users:${id}`;
     const cachedData = getFromCache(cacheKey);
+
     if (cachedData) {
-      res.status(StatusCodes.OK).json({ fromCache: true, success: true, user: cachedData });
+      return res.status(StatusCodes.OK).json({
+        fromCache: true,
+        success: true,
+        user: cachedData,
+      });
     }
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw new CustomError.BadRequestError("Invalid user ID format");
     }
 
-    const user = await User.findById(id).select(
-      "-password -verificationToken -googleId -verificationTokenExpirationDate"
-    );
+    const user = await User.findById(id)
+      .select("-password -verificationToken -googleId -verificationTokenExpirationDate")
+      .populate("addresses")
+      .lean();
 
     if (!user) {
       throw new CustomError.NotFoundError(`User with ID ${id} not found`);
     }
-    await setInCache(cacheKey, user.toObject());
-    res.status(StatusCodes.OK).json({ success: true, user, fromCache: false });
+
+    await setInCache(cacheKey, user);
+    res.status(StatusCodes.OK).json({
+      success: true,
+      user,
+      fromCache: false,
+    });
   } catch (error) {
     next(error);
   }
@@ -90,25 +102,23 @@ const getMyProfile = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    // Validate user ID format
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       throw new CustomError.BadRequestError("Invalid user ID format");
     }
 
-    // Get user with essential fields only
     const user = await User.findById(userId)
       .select("-password -verificationToken -googleId -verificationTokenExpirationDate")
+      .populate("addresses")
       .lean();
 
     if (!user) {
       throw new CustomError.NotFoundError("User profile not found");
     }
 
-    // Add any computed fields if needed
     const profileData = {
       ...user,
       fullAddress:
-        user.addresses.length > 0
+        user.addresses && user.addresses.length > 0
           ? `${user.addresses[0].street}, ${user.addresses[0].city}, ${user.addresses[0].state}`
           : null,
     };
@@ -147,35 +157,6 @@ const updateCurrentUser = async (req, res, next) => {
     if (walletAmount !== undefined) user.walletAmount = walletAmount;
     if (subscribedToNewsLetter !== undefined) {
       user.subscribedToNewsLetter = subscribedToNewsLetter;
-    }
-
-    // Handle address addition
-    if (address) {
-      const requiredFields = ["country", "state", "city", "street", "postalCode", "homeAddress"];
-      const missingFields = requiredFields.filter((field) => !address[field]);
-
-      if (missingFields.length > 0) {
-        throw new CustomError.BadRequestError(
-          `Missing address fields: ${missingFields.join(", ")}`
-        );
-      }
-
-      const isDuplicate = user.addresses.some((existingAddr) =>
-        requiredFields.every(
-          (field) =>
-            existingAddr[field]?.toString().toLowerCase() ===
-            address[field]?.toString().toLowerCase()
-        )
-      );
-
-      if (isDuplicate) {
-        throw new CustomError.BadRequestError("This address already exists");
-      }
-
-      user.addresses.push(address);
-      if (user.addresses.length > 5) {
-        user.addresses = user.addresses.slice(-5);
-      }
     }
 
     await user.save({ session });

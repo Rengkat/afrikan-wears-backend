@@ -2,26 +2,13 @@ const Address = require("../models/userAddressModel");
 const User = require("../models/userModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
-const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
 const mongoose = require("mongoose");
 
 const getAllAddresses = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const cacheKey = `addresses:${userId}`;
-
-    const cachedData = await getFromCache(cacheKey);
-    if (cachedData) {
-      return res.status(StatusCodes.OK).json({
-        fromCache: true,
-        success: true,
-        addresses: cachedData,
-      });
-    }
 
     const addresses = await Address.find({ user: userId }).sort({ isDefault: -1, createdAt: -1 });
-
-    await setInCache(cacheKey, addresses);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -80,9 +67,6 @@ const createAddress = async (req, res, next) => {
 
     await session.commitTransaction();
 
-    // Clear relevant caches
-    await Promise.all([clearCache(`addresses:${userId}`), clearCache(`user:${userId}`)]);
-
     res.status(StatusCodes.CREATED).json({
       success: true,
       address: address[0],
@@ -134,9 +118,6 @@ const updateAddress = async (req, res, next) => {
     await address.save({ session });
     await session.commitTransaction();
 
-    // Clear relevant caches
-    await Promise.all([clearCache(`addresses:${userId}`), clearCache(`user:${userId}`)]);
-
     res.status(StatusCodes.OK).json({
       success: true,
       address,
@@ -184,9 +165,6 @@ const deleteAddress = async (req, res, next) => {
 
     await session.commitTransaction();
 
-    // Clear relevant caches
-    await Promise.all([clearCache(`addresses:${userId}`), clearCache(`user:${userId}`)]);
-
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Address deleted successfully",
@@ -230,9 +208,6 @@ const setDefaultAddress = async (req, res, next) => {
     }
 
     await session.commitTransaction();
-
-    // Clear relevant caches
-    await Promise.all([clearCache(`addresses:${userId}`), clearCache(`user:${userId}`)]);
 
     res.status(StatusCodes.OK).json({
       success: true,
