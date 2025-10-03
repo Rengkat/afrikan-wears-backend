@@ -260,6 +260,40 @@ const getCurrentUser = async (req, res, next) => {
     next(error);
   }
 };
+// for nextjs middleware
+const validateTokens = async (req, res, next) => {
+  try {
+    // Your existing authenticateUser middleware logic
+    const { accessToken, refreshToken } = req.signedCookies;
+
+    if (accessToken) {
+      const payload = isTokenVerified(accessToken);
+      return res.status(StatusCodes.OK).json({ valid: true, user: payload.accessToken });
+    }
+
+    if (refreshToken) {
+      try {
+        const payload = isTokenVerified(refreshToken);
+        const existingToken = await Token.findOne({
+          user: payload.accessToken.id,
+          refreshToken: payload.refreshToken,
+          isValid: true,
+        });
+
+        if (existingToken) {
+          return res.status(StatusCodes.OK).json({ valid: true, user: payload.accessToken });
+        }
+      } catch (error) {
+        throw CustomError.UnauthenticatedError("Invalid tokens");
+      }
+    }
+
+    return res.status(StatusCodes.FORBIDDEN).json({ valid: false, error: "Invalid tokens" });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const logout = async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -422,4 +456,5 @@ module.exports = {
   forgotPassword,
   resetPassword,
   refreshTokens,
+  validateTokens,
 };

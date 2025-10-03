@@ -9,6 +9,7 @@ const {
   resendVerificationEmail,
   getCurrentUser,
   refreshTokens,
+  validateTokens,
 } = require("../controllers/authController");
 const passport = require("passport");
 const express = require("express");
@@ -23,6 +24,7 @@ router.post("/logout", authenticateUser, logout);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.post("/refresh-token", refreshTokens);
+router.post("/validate-tokens", validateTokens);
 // router.get(
 //   "/google",
 //   passport.authenticate("google", {
