@@ -9,7 +9,7 @@ const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
   const accessTokenJWT = createJwt({ payload: { accessToken: userPayload } });
   const refreshTokenJWT = createJwt({ payload: { accessToken: userPayload, refreshToken } });
 
-  // Attach accessToken (short-lived, e.g., 5 minutes)
+  // Attach accessToken (short-lived,)
   const commonCookieOptions = {
     httpOnly: true,
     signed: true,
@@ -18,7 +18,7 @@ const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
   };
   res.cookie("accessToken", accessTokenJWT, {
     ...commonCookieOptions,
-    maxAge: 1000 * 60 * 5,
+    maxAge: 1000 * 60 * 15,
   });
 
   res.cookie("refreshToken", refreshTokenJWT, {

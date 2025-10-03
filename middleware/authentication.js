@@ -1,65 +1,105 @@
 const CustomError = require("../errors");
-const { isTokenVerified, attachTokenToResponse } = require("../utils");
+const { isTokenVerified, attachTokenToResponse, createUserPayload } = require("../utils");
 const Token = require("../models/tokenModel");
 const crypto = require("crypto");
+const User = require("../models/userModel");
 
 const authenticateUser = async (req, res, next) => {
   try {
     const { accessToken, refreshToken } = req.signedCookies;
+
+    // Try access token first
     if (accessToken) {
-      const payload = isTokenVerified(accessToken);
-      req.user = payload.accessToken;
-      return next();
-    }
-
-    if (refreshToken) {
-      const payload = isTokenVerified(refreshToken);
-
-      const existingRefreshToken = await Token.findOne({
-        user: payload.accessToken.id,
-        refreshToken: payload.refreshToken,
-      });
-
-      if (!existingRefreshToken || !existingRefreshToken.isValid) {
-        throw new CustomError.UnauthenticatedError(
-          "Authentication invalid - Refresh token invalid or expired"
-        );
+      try {
+        const payload = isTokenVerified(accessToken);
+        req.user = payload.accessToken;
+        return next();
+      } catch (accessTokenError) {
+        console.log("Access token expired or invalid:", accessTokenError.message);
+        // Continue to refresh token logic
       }
-
-      // Re-attach new access and refresh tokens (rotate refresh token for better security)
-      // generate a NEW refresh token here for better security practices
-      const newRefreshTokenString = crypto.randomBytes(40).toString("hex");
-      existingRefreshToken.refreshToken = newRefreshTokenString;
-      await existingRefreshToken.save();
-
-      attachTokenToResponse({
-        res,
-        userPayload: payload.accessToken,
-        refreshToken: newRefreshTokenString,
-      });
-
-      req.user = payload.accessToken;
-      return next();
     }
+
+    // Try refresh token if access token is invalid/missing
+    if (refreshToken) {
+      try {
+        const payload = isTokenVerified(refreshToken);
+
+        const existingRefreshToken = await Token.findOne({
+          user: payload.accessToken.id,
+          refreshToken: payload.refreshToken,
+          isValid: true,
+        });
+
+        if (!existingRefreshToken) {
+          console.log("No valid refresh token found in database");
+          throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
+        }
+
+        // Refresh token is valid - rotate tokens
+        const newRefreshToken = crypto.randomBytes(40).toString("hex");
+        existingRefreshToken.refreshToken = newRefreshToken;
+        await existingRefreshToken.save();
+
+        // Find user - FIXED: added await
+        const user = await User.findById(payload.accessToken.id).select("-password");
+        if (!user) {
+          console.log("User not found for refresh token");
+          throw new CustomError.UnauthenticatedError("User not found. Please log in again.");
+        }
+
+        const userPayload = createUserPayload(user);
+
+        // Attach new tokens to response
+        attachTokenToResponse({
+          res,
+          userPayload,
+          refreshToken: newRefreshToken,
+        });
+
+        req.user = userPayload;
+        return next();
+      } catch (refreshTokenError) {
+        console.log("Refresh token validation failed:", refreshTokenError.message);
+
+        // Only clear cookies for specific JWT errors, not all errors
+        if (
+          refreshTokenError.name === "JsonWebTokenError" ||
+          refreshTokenError.name === "TokenExpiredError"
+        ) {
+          clearAuthCookies(res);
+        }
+
+        throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
+      }
+    }
+
+    // No tokens available at all
+    console.log("No authentication tokens found");
+    throw new CustomError.UnauthenticatedError("Authentication required. Please log in.");
   } catch (error) {
+    // Only handle specific JWT errors, let others propagate
     if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
-      const options = {
-        httpOnly: true,
-        expires: new Date(Date.now()),
-        secure: process.env.NODE_ENV === "production",
-      };
-      res.cookie("accessToken", "logout", {
-        ...options,
-      });
-      res.cookie("refreshToken", "logout", {
-        ...options,
-      });
-      return next(
-        new CustomError.UnauthenticatedError("Authentication invalid - Please log in again")
-      );
+      clearAuthCookies(res);
+      return next(new CustomError.UnauthenticatedError("Session expired. Please log in again."));
     }
+
+    // For other errors (like database errors), don't clear cookies
     next(error);
   }
+};
+
+// Helper function to clear auth cookies
+const clearAuthCookies = (res) => {
+  const options = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path: "/",
+  };
+
+  res.cookie("accessToken", "", { ...options, maxAge: 0 });
+  res.cookie("refreshToken", "", { ...options, maxAge: 0 });
 };
 
 const restrictToUser = (...roles) => {
@@ -81,10 +121,11 @@ const adminAuthorization = async (req, res, next) => {
     next(error);
   }
 };
+
 const stylistAuthorization = async (req, res, next) => {
   try {
     if (req.user.role !== "stylist") {
-      throw new CustomError.UnauthorizedError(
+      throw new CustomError.UnauthenticatedError(
         "Not authorized to access this route. Only for stylist"
       );
     }
@@ -93,6 +134,7 @@ const stylistAuthorization = async (req, res, next) => {
     next(error);
   }
 };
+
 const adminAndStylistAuthorization = (...roles) => {
   return async (req, res, next) => {
     try {
@@ -105,6 +147,7 @@ const adminAndStylistAuthorization = (...roles) => {
     }
   };
 };
+
 module.exports = {
   authenticateUser,
   adminAuthorization,

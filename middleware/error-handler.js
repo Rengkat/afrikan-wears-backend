@@ -11,8 +11,8 @@ const errorHandlerMiddleware = (err, req, res, next) => {
     customError.message = Object.values(err.errors)
       .map((item) => item.message)
       .join(", ");
+      customError.statusCode = StatusCodes.BAD_REQUEST;
   }
-  customError.statusCode = StatusCodes.BAD_REQUEST;
   //mongoose duplicate error
   if (err.code && err.code === 11000) {
     customError.message = `Duplicate value entered for ${Object.keys(

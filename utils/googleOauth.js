@@ -1,4 +1,4 @@
-const passport = require("passport");
+/*const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const User = require("../models/userModel");
 const Token = require("../models/tokenModel");
@@ -80,3 +80,4 @@ passport.deserializeUser((user, done) => {
 });
 
 module.exports = passport;
+*/
