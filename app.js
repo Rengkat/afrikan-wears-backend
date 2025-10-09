@@ -34,6 +34,7 @@ const stylistRouter = require("./routes/stylistRoute");
 const orderRoute = require("./routes/orderRoute");
 const transactionRoute = require("./routes/transactionRoute");
 const notificationRoute = require("./routes/notificationRoute");
+const webhookRoute = require("./routes/webhooks");
 // Middleware imports
 const notFoundMiddleware = require("./middleware/not-found");
 const errorHandlerMiddleware = require("./middleware/error-handler");
@@ -165,6 +166,7 @@ app.use("/api/stylists", apiLimiter, stylistRouter);
 app.use("/api/orders", apiLimiter, orderRoute);
 app.use("/api/transactions", apiLimiter, transactionRoute);
 app.use("/api/notifications", apiLimiter, notificationRoute);
+app.use("/api/webhooks", apiLimiter, webhookRoute);
 // Error handling middleware
 app.use(notFoundMiddleware);
 app.use(errorHandlerMiddleware);
