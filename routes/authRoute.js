@@ -24,7 +24,7 @@ router.post("/logout", authenticateUser, logout);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.post("/refresh-token", refreshTokens);
-router.post("/validate-tokens", validateTokens);
+router.get("/validate-tokens", validateTokens);
 // router.get(
 //   "/google",
 //   passport.authenticate("google", {

@@ -9,6 +9,7 @@ const getNotifications = async (req, res, next) => {
 
     const notifications = await Notification.find({ recipient: req.user.id })
       .sort({ createdAt: -1 })
+
       .skip(skip)
       .limit(limit);
 

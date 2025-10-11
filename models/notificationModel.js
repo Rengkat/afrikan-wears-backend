@@ -26,6 +26,8 @@ const notificationSchema = new mongoose.Schema(
         "new_order",
         "order_status_update",
         "message_received",
+        "credit_wallet",
+        "debit_wallet",
         "system_alert",
       ],
     },

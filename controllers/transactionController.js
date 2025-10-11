@@ -20,12 +20,10 @@ const fundWallet = async (req, res, next) => {
       throw new CustomError.BadRequestError("Please provide a valid positive amount");
     }
 
-    // Minimum amount check (Paystack minimum is typically 100 Naira/1 USD)
     if (amount < 100) {
       throw new CustomError.BadRequestError("Minimum wallet credit amount is 100");
     }
 
-    // Maximum amount check
     if (amount > 1000000) {
       throw new CustomError.BadRequestError("Maximum wallet credit amount is 1,000,000");
     }
@@ -36,15 +34,17 @@ const fundWallet = async (req, res, next) => {
       throw new CustomError.NotFoundError("User not found");
     }
 
+    const currentBalance = Number(user.walletAmount) || 0;
+
     // Generate unique reference
     const reference = `WALLET_${userId}_${Date.now()}`;
 
     // Initialize Paystack payment
     const paystackResponse = await paystack.transaction.initialize({
       email: userEmail,
-      amount: Math.round(amount * 100), // Convert to kobo
+      amount: Math.round(amount * 100),
       reference: reference,
-      callback_url: `${process.env.FRONTEND_URL}/wallet/verify?reference=${reference}`,
+      callback_url: `${process.env.ORIGIN}/account/user/transactions/verify?reference=${reference}`,
       metadata: {
         custom_fields: [
           {
@@ -78,8 +78,8 @@ const fundWallet = async (req, res, next) => {
           user: userId,
           amount,
           type: "credit",
-          previousBalance: user.walletBalance,
-          currentBalance: user.walletBalance,
+          previousBalance: currentBalance,
+          currentBalance: currentBalance,
           reference: paystackResponse.data.reference,
           description: description || "Wallet funding initiated",
           status: "pending",
@@ -112,7 +112,6 @@ const fundWallet = async (req, res, next) => {
     session.endSession();
   }
 };
-
 const verifyWalletFunding = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -135,20 +134,20 @@ const verifyWalletFunding = async (req, res, next) => {
     if (existingTransaction) {
       await session.abortTransaction();
 
-      // Get current user balance
       const user = await User.findById(userId);
-
       return res.status(StatusCodes.OK).json({
         success: true,
         message: "Payment already verified",
-        newBalance: user.walletBalance,
+        newBalance: user.walletAmount || 0,
         transaction: existingTransaction,
-        verifiedBy: "webhook", // Indicate it was already verified automatically
+        verifiedBy: "webhook",
       });
     }
 
-    // Verify payment with Paystack
-    const verificationResponse = await paystack.transaction.verify(reference);
+    // Verify with Paystack
+    const verificationResponse = await paystack.transaction.verify({
+      reference: reference,
+    });
 
     if (!verificationResponse.status) {
       throw new CustomError.BadRequestError(
@@ -158,7 +157,6 @@ const verifyWalletFunding = async (req, res, next) => {
 
     const paymentData = verificationResponse.data;
 
-    // Check if payment was successful
     if (paymentData.status !== "success") {
       throw new CustomError.BadRequestError(
         `Payment not successful. Current status: ${paymentData.status}`
@@ -173,11 +171,14 @@ const verifyWalletFunding = async (req, res, next) => {
     }).session(session);
 
     if (!transaction) {
+      const anyTransaction = await Transaction.findOne({ reference, user: userId });
+
       throw new CustomError.NotFoundError("Pending transaction not found");
     }
 
     // Verify the amount matches
     const amountPaid = paymentData.amount / 100;
+
     if (amountPaid !== transaction.amount) {
       throw new CustomError.BadRequestError(
         `Amount paid (${amountPaid}) does not match expected amount (${transaction.amount})`
@@ -190,15 +191,18 @@ const verifyWalletFunding = async (req, res, next) => {
       throw new CustomError.NotFoundError("User not found");
     }
 
+    const currentBalance = Number(user.walletAmount) || 0;
+    const previousBalance = currentBalance;
+    const newBalance = currentBalance + amountPaid;
+
     // Update wallet balance
-    const previousBalance = user.walletBalance;
-    user.walletBalance += amountPaid;
+    user.walletAmount = newBalance;
     await user.save({ session });
 
     // Update transaction status
     transaction.status = "completed";
     transaction.previousBalance = previousBalance;
-    transaction.currentBalance = user.walletBalance;
+    transaction.currentBalance = newBalance;
     transaction.metadata.verification = paymentData;
     transaction.metadata.verified_at = new Date();
     transaction.metadata.verified_by = "manual";
@@ -209,7 +213,7 @@ const verifyWalletFunding = async (req, res, next) => {
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Wallet funded successfully",
-      newBalance: user.walletBalance,
+      newBalance: newBalance,
       transaction,
       verifiedBy: "manual",
     });
