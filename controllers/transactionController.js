@@ -5,6 +5,8 @@ const CustomError = require("../errors");
 const mongoose = require("mongoose");
 const paystack = require("paystack-api")(process.env.PAYSTACK_SECRET_KEY);
 const crypto = require("crypto");
+const { generatePaymentReference } = require("../utils/payment");
+const PaymentService = require("../utils/paystack");
 
 const fundWallet = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -13,7 +15,6 @@ const fundWallet = async (req, res, next) => {
   try {
     const { amount, description } = req.body;
     const userId = req.user.id;
-    const userEmail = req.user.email;
 
     // Validate input
     if (!amount || amount <= 0) {
@@ -36,74 +37,41 @@ const fundWallet = async (req, res, next) => {
 
     const currentBalance = Number(user.walletAmount) || 0;
 
-    // Generate unique reference
-    const reference = `WALLET_${userId}_${Date.now()}`;
+    // Generate reference in controller
+    const reference = generatePaymentReference("WALLET", userId);
 
-    // Initialize Paystack payment
-    const paystackResponse = await paystack.transaction.initialize({
-      email: userEmail,
-      amount: Math.round(amount * 100),
-      reference: reference,
-      callback_url: `${process.env.ORIGIN}/account/user/transactions/verify?reference=${reference}`,
-      metadata: {
-        custom_fields: [
-          {
-            display_name: "User ID",
-            variable_name: "user_id",
-            value: userId.toString(),
-          },
-          {
-            display_name: "Purpose",
-            variable_name: "purpose",
-            value: "wallet_funding",
-          },
-        ],
-        purpose: "wallet_funding",
-        user_id: userId.toString(),
-        description: description || "Wallet credit",
-      },
-      channels: ["card", "bank", "ussd", "qr", "mobile_money"],
+    // Initialize payment using PaymentService
+    const paymentInit = await PaymentService.initializePayment({
+      user: req.user,
+      amount,
+      purpose: "wallet_funding",
+      description: description || "Wallet credit",
+      reference,
     });
 
-    if (!paystackResponse.status) {
-      throw new CustomError.BadRequestError(
-        `Payment initialization failed: ${paystackResponse.message || "Unknown error"}`
-      );
-    }
-
-    // Create a pending transaction record
-    const transaction = await Transaction.create(
-      [
-        {
-          user: userId,
-          amount,
-          type: "credit",
-          previousBalance: currentBalance,
-          currentBalance: currentBalance,
-          reference: paystackResponse.data.reference,
-          description: description || "Wallet funding initiated",
-          status: "pending",
-          metadata: {
-            payment_gateway: "paystack",
-            authorization_url: paystackResponse.data.authorization_url,
-            access_code: paystackResponse.data.access_code,
-            purpose: "wallet_funding",
-            initialized_at: new Date(),
-          },
-        },
-      ],
-      { session }
-    );
+    // Create pending transaction
+    const transaction = await PaymentService.createPendingTransaction({
+      user: req.user,
+      amount,
+      type: "credit",
+      purpose: "wallet_funding",
+      description: description || "Wallet funding initiated",
+      reference: paymentInit.reference,
+      authorizationUrl: paymentInit.authorizationUrl,
+      accessCode: paymentInit.accessCode,
+      currentBalance,
+      session,
+    });
 
     await session.commitTransaction();
 
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Payment initialization successful",
-      authorizationUrl: paystackResponse.data.authorization_url,
-      reference: paystackResponse.data.reference,
-      accessCode: paystackResponse.data.access_code,
-      transaction: transaction[0],
+      authorizationUrl: paymentInit.authorizationUrl,
+      reference: paymentInit.reference,
+      accessCode: paymentInit.accessCode,
+      transaction,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -112,6 +80,7 @@ const fundWallet = async (req, res, next) => {
     session.endSession();
   }
 };
+
 const verifyWalletFunding = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -124,7 +93,7 @@ const verifyWalletFunding = async (req, res, next) => {
       throw new CustomError.BadRequestError("Payment reference is required");
     }
 
-    // Check if transaction is already completed (via webhook)
+    // Check if transaction is already completed
     const existingTransaction = await Transaction.findOne({
       reference,
       user: userId,
@@ -133,7 +102,6 @@ const verifyWalletFunding = async (req, res, next) => {
 
     if (existingTransaction) {
       await session.abortTransaction();
-
       const user = await User.findById(userId);
       return res.status(StatusCodes.OK).json({
         success: true,
@@ -144,18 +112,9 @@ const verifyWalletFunding = async (req, res, next) => {
       });
     }
 
-    // Verify with Paystack
-    const verificationResponse = await paystack.transaction.verify({
-      reference: reference,
-    });
-
-    if (!verificationResponse.status) {
-      throw new CustomError.BadRequestError(
-        `Payment verification failed: ${verificationResponse.message || "Unknown error"}`
-      );
-    }
-
-    const paymentData = verificationResponse.data;
+    // Verify payment
+    const verificationResult = await PaymentService.verifyPayment(reference);
+    const paymentData = verificationResult.data;
 
     if (paymentData.status !== "success") {
       throw new CustomError.BadRequestError(
@@ -171,18 +130,7 @@ const verifyWalletFunding = async (req, res, next) => {
     }).session(session);
 
     if (!transaction) {
-      const anyTransaction = await Transaction.findOne({ reference, user: userId });
-
       throw new CustomError.NotFoundError("Pending transaction not found");
-    }
-
-    // Verify the amount matches
-    const amountPaid = paymentData.amount / 100;
-
-    if (amountPaid !== transaction.amount) {
-      throw new CustomError.BadRequestError(
-        `Amount paid (${amountPaid}) does not match expected amount (${transaction.amount})`
-      );
     }
 
     // Get the user
@@ -191,30 +139,27 @@ const verifyWalletFunding = async (req, res, next) => {
       throw new CustomError.NotFoundError("User not found");
     }
 
-    const currentBalance = Number(user.walletAmount) || 0;
-    const previousBalance = currentBalance;
-    const newBalance = currentBalance + amountPaid;
+    // Complete the payment with wallet update logic
+    const onSuccess = async ({ user, amountPaid, session }) => {
+      user.walletAmount = (user.walletAmount || 0) + amountPaid;
+      await user.save({ session });
+    };
 
-    // Update wallet balance
-    user.walletAmount = newBalance;
-    await user.save({ session });
-
-    // Update transaction status
-    transaction.status = "completed";
-    transaction.previousBalance = previousBalance;
-    transaction.currentBalance = newBalance;
-    transaction.metadata.verification = paymentData;
-    transaction.metadata.verified_at = new Date();
-    transaction.metadata.verified_by = "manual";
-    await transaction.save({ session });
+    const completedTransaction = await PaymentService.completePayment({
+      transaction,
+      paymentData,
+      user,
+      onSuccess,
+      session,
+    });
 
     await session.commitTransaction();
 
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Wallet funded successfully",
-      newBalance: newBalance,
-      transaction,
+      newBalance: user.walletAmount,
+      transaction: completedTransaction,
       verifiedBy: "manual",
     });
   } catch (error) {
@@ -224,7 +169,6 @@ const verifyWalletFunding = async (req, res, next) => {
     session.endSession();
   }
 };
-
 //call by paystack
 const handlePaymentWebhook = async (req, res, next) => {
   const session = await mongoose.startSession();
