@@ -5,7 +5,6 @@ const mongoose = require("mongoose");
 const fs = require("fs").promises;
 
 const { emitMessageEvent, writeClient } = require("../utils");
-
 const sendMessage = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -17,7 +16,8 @@ const sendMessage = async (req, res, next) => {
       throw new CustomError.BadRequestError("Please provide all fields");
     }
 
-    if (!mongoose.Types.ObjectId.isValid(sender) || !mongoose.Types.ObjectId.isValid(receiver)) {
+    // Use isValidObjectId for validation
+    if (!mongoose.isValidObjectId(sender) || !mongoose.isValidObjectId(receiver)) {
       throw new CustomError.BadRequestError("Invalid sender or receiver ID");
     }
 
@@ -27,13 +27,18 @@ const sendMessage = async (req, res, next) => {
 
     const message = await Message.create([{ sender, receiver, content, image }], { session });
 
+    // Populate before emitting
+    const populatedMessage = await Message.findById(message[0]._id)
+      .populate("sender", "firstName surname avatar")
+      .populate("receiver", "firstName surname avatar");
+
     // Emit the new message to the receiver via Socket.IO
-    emitMessageEvent(req.io, "newMessage", message[0]);
+    emitMessageEvent(req.io, "newMessage", populatedMessage);
 
     await session.commitTransaction();
     res.status(StatusCodes.CREATED).json({
       success: true,
-      data: message[0],
+      data: populatedMessage,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -42,7 +47,6 @@ const sendMessage = async (req, res, next) => {
     session.endSession();
   }
 };
-
 const getMessages = async (req, res, next) => {
   try {
     const { senderId, receiverId } = req.params;
@@ -64,9 +68,11 @@ const getMessages = async (req, res, next) => {
           { sender: receiverId, receiver: senderId },
         ],
       })
-        .sort({ timestamp: -1 }) // Newest first
+        .sort({ timestamp: -1 })
         .skip(skip)
         .limit(limit)
+        .populate("sender", "firstName surname avatar")
+        .populate("receiver", "firstName surname avatar")
         .lean(),
       Message.countDocuments({
         $or: [
@@ -82,6 +88,123 @@ const getMessages = async (req, res, next) => {
       total,
       page: Number(page),
       pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getChats = async (req, res, next) => {
+  try {
+    const currentUserId = req.user.id;
+
+    // Validate currentUserId
+    if (!mongoose.isValidObjectId(currentUserId)) {
+      throw new CustomError.BadRequestError("Invalid user ID");
+    }
+
+    const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
+
+    // Get distinct conversations where current user is either sender or receiver
+    const chats = await Message.aggregate([
+      {
+        $match: {
+          $or: [{ sender: currentUserObjectId }, { receiver: currentUserObjectId }],
+        },
+      },
+      {
+        $sort: { timestamp: -1 },
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [{ $eq: ["$sender", currentUserObjectId] }, "$receiver", "$sender"],
+          },
+          lastMessage: { $first: "$content" },
+          lastMessageTime: { $first: "$timestamp" },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [{ $ne: ["$sender", currentUserObjectId] }, { $eq: ["$read", false] }],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          lastMessageId: { $first: "$_id" },
+          lastMessageSender: { $first: "$sender" },
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "userInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$userInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          userId: "$_id",
+          userName: {
+            $cond: {
+              if: { $ne: ["$userInfo", null] },
+              then: {
+                $cond: {
+                  if: { $ne: ["$userInfo.name", null] },
+                  then: "$userInfo.name",
+                  else: {
+                    $concat: [
+                      { $ifNull: ["$userInfo.firstName", "Unknown"] },
+                      " ",
+                      { $ifNull: ["$userInfo.surname", "User"] },
+                    ],
+                  },
+                },
+              },
+              else: "Deleted User",
+            },
+          },
+          avatar: {
+            $cond: {
+              if: { $ne: ["$userInfo", null] },
+              then: { $ifNull: ["$userInfo.avatar", "/avatar.jpg"] },
+              else: "/avatar.jpg",
+            },
+          },
+          role: {
+            $cond: {
+              if: { $ne: ["$userInfo", null] },
+              then: { $ifNull: ["$userInfo.role", "user"] },
+              else: "user",
+            },
+          },
+          lastMessage: 1,
+          lastMessageTime: 1,
+          unreadCount: 1,
+          lastMessageSender: 1,
+          isLastMessageFromMe: {
+            $eq: ["$lastMessageSender", currentUserObjectId],
+          },
+          isUserActive: { $ne: ["$userInfo", null] }, // Flag for deleted users
+        },
+      },
+      {
+        $sort: { lastMessageTime: -1 },
+      },
+    ]);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      data: chats,
     });
   } catch (error) {
     next(error);
@@ -211,6 +334,7 @@ const uploadMessageImage = async (req, res, next) => {
 module.exports = {
   sendMessage,
   getMessages,
+  getChats,
   updateMessage,
   deleteMessage,
   uploadMessageImage,

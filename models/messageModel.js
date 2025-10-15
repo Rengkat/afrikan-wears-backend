@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
 
-// Define the Message schema
 const messageSchema = new mongoose.Schema({
   sender: {
     type: mongoose.Schema.Types.ObjectId,
@@ -27,8 +26,9 @@ const messageSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  image: {
-    type: String,
+  online: {
+    type: Boolean,
+    default: false,
   },
 });
 
