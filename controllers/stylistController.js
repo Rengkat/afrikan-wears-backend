@@ -11,9 +11,18 @@ const addStylist = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const { company, description, owner, specialty, services, phone, location } = req.body;
+    const {
+      company,
+      description,
+      owner,
+      specialty,
+      services,
+      phone,
+      location,
+      cacCertificateNumber, // ADD THIS
+    } = req.body;
 
-    // Validate required fields
+    // Validate required fields - UPDATE VALIDATION
     if (
       !company ||
       !owner ||
@@ -21,10 +30,11 @@ const addStylist = async (req, res, next) => {
       !services?.length ||
       !phone ||
       !location?.state ||
-      !location?.address
+      !location?.address ||
+      !cacCertificateNumber
     ) {
       throw new CustomError.BadRequestError(
-        "Provide company, owner ID, specialty, services, phone, and full location (state + address)"
+        "Provide company, owner ID, specialty, services, phone, CAC certificate number, and full location (state + address)"
       );
     }
 
@@ -37,7 +47,15 @@ const addStylist = async (req, res, next) => {
       throw new CustomError.BadRequestError("Company name already exists");
     }
 
-    // Create stylist
+    // Check if CAC certificate number already exists
+    const existingCAC = await Stylist.findOne({
+      cacCertificateNumber: cacCertificateNumber.trim(),
+    }).session(session);
+
+    if (existingCAC) {
+      throw new CustomError.BadRequestError("CAC certificate number already registered");
+    }
+
     const stylist = await Stylist.create(
       [
         {
@@ -48,6 +66,9 @@ const addStylist = async (req, res, next) => {
           services,
           phone,
           location,
+          cacCertificateNumber: cacCertificateNumber.trim(),
+          verificationStatus: "pending",
+          isCompanyVerified: false,
         },
       ],
       { session }
@@ -65,9 +86,24 @@ const addStylist = async (req, res, next) => {
 
     await session.commitTransaction();
     await clearCache("stylist:*");
+
+    // Emit notification for admin verification
+    const notificationPayload = {
+      type: "stylist_verification_request",
+      message: `New stylist "${stylist[0].company}" requires verification`,
+      data: {
+        stylistId: stylist[0]._id,
+        companyName: stylist[0].company,
+        cacCertificateNumber: stylist[0].cacCertificateNumber,
+        createdAt: new Date(),
+      },
+    };
+    emitNotification(req.io, "newNotification", notificationPayload, "admin_room");
+
     res.status(StatusCodes.CREATED).json({
       success: true,
       stylist: stylist[0],
+      message: "Stylist registered successfully. Awaiting admin verification.",
     });
   } catch (error) {
     await session.abortTransaction();
