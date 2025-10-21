@@ -92,6 +92,39 @@ const StylistSchema = new mongoose.Schema(
       lowercase: true,
       index: true,
     },
+
+    // VERIFICATION FIELDS - ADD THESE
+    isCompanyVerified: {
+      type: Boolean,
+      default: false,
+    },
+    cacCertificateNumber: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true, // Allows null values while maintaining uniqueness
+    },
+    verificationStatus: {
+      type: String,
+      enum: ["pending", "verified", "rejected"],
+      default: "pending",
+    },
+    verificationDate: {
+      type: Date,
+    },
+    verifiedBy: {
+      type: mongoose.Types.ObjectId,
+      ref: "User",
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+    },
+    documents: {
+      cacCertificate: { type: String },
+      businessRegistration: { type: String },
+      taxCertificate: { type: String },
+    },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
@@ -102,6 +135,11 @@ StylistSchema.pre("save", function (next) {
     this.slug = this.companyName.toLowerCase().replace(/\s+/g, "-");
   }
   next();
+});
+
+// Virtual for checking if stylist can add products
+StylistSchema.virtual("canAddProducts").get(function () {
+  return this.isCompanyVerified && this.verificationStatus === "verified";
 });
 
 module.exports = mongoose.model("Stylist", StylistSchema);

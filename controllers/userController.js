@@ -28,6 +28,7 @@ const getAllUsers = async (req, res, next) => {
         { surname: { $regex: name, $options: "i" } },
       ];
     }
+    // if(user.role)
 
     // Execute queries in parallel
     const [users, total] = await Promise.all([

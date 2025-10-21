@@ -76,6 +76,10 @@ const addStylist = async (req, res, next) => {
     session.endSession();
   }
 };
+const verifyStylistCompany = async (req, res, next) => {
+  // const {}
+};
+
 const getAllStylists = async (req, res, next) => {
   try {
     const { company, specialty, page = 1, limit = 10 } = req.query;
@@ -99,7 +103,9 @@ const getAllStylists = async (req, res, next) => {
     if (specialty) {
       query.specialty = { $regex: specialty, $options: "i" };
     }
-
+    if (isCompanyVerified) {
+      query.isCompanyVerified = "true";
+    }
     // Fetch data
     const [stylists, total] = await Promise.all([
       Stylist.find(query)
