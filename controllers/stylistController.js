@@ -113,7 +113,90 @@ const addStylist = async (req, res, next) => {
   }
 };
 const verifyStylistCompany = async (req, res, next) => {
-  // const {}
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const { action, rejectionReason } = req.body;
+    const { userId } = req.user;
+
+    if (!["verify", "reject"].includes(action)) {
+      throw new CustomError.BadRequestError("Invalid action. Use 'verify' or 'reject'");
+    }
+
+    const stylist = await Stylist.findById(id).session(session);
+    if (!stylist) {
+      throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
+    }
+
+    // Check if already verified/rejected
+    if (stylist.verificationStatus !== "pending") {
+      throw new CustomError.BadRequestError(`Stylist is already ${stylist.verificationStatus}`);
+    }
+
+    if (action === "verify") {
+      stylist.isCompanyVerified = true;
+      stylist.verificationStatus = "verified";
+      stylist.verificationDate = new Date();
+      stylist.verifiedBy = userId;
+      stylist.rejectionReason = undefined;
+
+      // Notify stylist
+      const notificationPayload = {
+        type: "stylist_verified",
+        message: `Your company "${stylist.company}" has been verified! You can now add products.`,
+        data: {
+          stylistId: stylist._id,
+          companyName: stylist.company,
+          verifiedAt: new Date(),
+        },
+      };
+      emitNotification(req.io, "newNotification", notificationPayload, stylist.owner.toString());
+    } else {
+      // Reject action
+      if (!rejectionReason || rejectionReason.trim().length < 10) {
+        throw new CustomError.BadRequestError(
+          "Please provide a valid rejection reason (min 10 chars)"
+        );
+      }
+
+      stylist.isCompanyVerified = false;
+      stylist.verificationStatus = "rejected";
+      stylist.rejectionReason = rejectionReason.trim();
+      stylist.verifiedBy = userId;
+
+      // Notify stylist with reason
+      const notificationPayload = {
+        type: "stylist_rejected",
+        message: `Your company verification for "${stylist.company}" was rejected`,
+        data: {
+          stylistId: stylist._id,
+          companyName: stylist.company,
+          rejectionReason: rejectionReason,
+          rejectedAt: new Date(),
+        },
+      };
+      emitNotification(req.io, "newNotification", notificationPayload, stylist.owner.toString());
+    }
+
+    await stylist.save({ session });
+    await session.commitTransaction();
+
+    // Clear cache
+    await Promise.all([clearCache(`stylist:${id}`), clearCache("stylist:*")]);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Stylist ${action === "verify" ? "verified" : "rejected"} successfully`,
+      stylist,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+  } finally {
+    session.endSession();
+  }
 };
 
 const getAllStylists = async (req, res, next) => {
