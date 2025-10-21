@@ -52,11 +52,17 @@ const addProduct = async (req, res, next) => {
     if (!stylistId || !mongoose.Types.ObjectId.isValid(stylistId)) {
       throw new CustomError.BadRequestError("Provide valid stylist ID");
     }
-    // Only allow the stylist that their business has been verified by admin before creatng products
-    const stylistCompany = await Stylist.findById(stylistId);
-    if (user.role === "stylist" && !stylistCompany.isCompanyVerified) {
+
+    // VERIFICATION CHECK
+    const stylistCompany = await Stylist.findById(stylistId).session(session);
+    if (!stylistCompany) {
+      throw new CustomError.NotFoundError("Stylist company not found");
+    }
+
+    if (role === "stylist" && !stylistCompany.canAddProducts) {
       throw new CustomError.BadRequestError(
-        "Your company must be verified by admin before you start adding products"
+        "Your company must be verified by admin before you can add products. Current status: " +
+          stylistCompany.verificationStatus
       );
     }
 

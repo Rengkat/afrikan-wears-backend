@@ -93,7 +93,6 @@ const StylistSchema = new mongoose.Schema(
       index: true,
     },
 
-    // VERIFICATION FIELDS - ADD THESE
     isCompanyVerified: {
       type: Boolean,
       default: false,
@@ -102,7 +101,7 @@ const StylistSchema = new mongoose.Schema(
       type: String,
       trim: true,
       unique: true,
-      sparse: true, // Allows null values while maintaining uniqueness
+      sparse: true,
     },
     verificationStatus: {
       type: String,
