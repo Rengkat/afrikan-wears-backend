@@ -11,7 +11,6 @@ const { clearCache } = require("../utils/redisClient");
 const register = async (req, res, next) => {
   try {
     const { firstName, surname, email, password, companyName } = req.body;
-
     // check if details are present
     if (!firstName || !surname || !email || !password) {
       throw new CustomError.BadRequestError("Please provide all credentials");
@@ -182,13 +181,13 @@ const login = async (req, res, next) => {
     // Check if user exists with email
     const user = await User.findOne({ email });
     if (!user) {
-      throw new CustomError.NotFoundError("User not found");
+      throw new CustomError.UnauthenticatedError("Invalid email or password");
     }
 
     // Check if password is correct
     const isPasswordCorrect = await user.comparePassword(password);
     if (!isPasswordCorrect) {
-      throw new CustomError.UnauthenticatedError("Password wrong! Please enter correct password");
+      throw new CustomError.UnauthenticatedError("Invalid email or password");
     }
 
     // Check if user is verified
@@ -199,21 +198,35 @@ const login = async (req, res, next) => {
     // Create access token
     const userPayload = createUserPayload(user);
     let refreshToken;
-    // Check if refresh token exists
-    const refreshTokenExist = await Token.findOne({ user: user._id });
 
-    if (refreshTokenExist) {
-      if (!refreshTokenExist.isValid) {
-        throw new CustomError.UnauthenticatedError("Invalid credentials");
-      }
-      refreshToken = refreshTokenExist.refreshToken;
+    // Check if refresh token exists and is valid
+    const existingToken = await Token.findOne({ user: user._id });
+
+    if (existingToken && existingToken.isValid) {
+      // Use existing valid token
+      refreshToken = existingToken.refreshToken;
     } else {
-      // If refresh token does not exist, create one
+      // If no valid token exists, create a new one
       refreshToken = crypto.randomBytes(40).toString("hex");
       const ip = req.ip;
       const userAgent = req.headers["user-agent"];
-      const refreshTokenPayload = { refreshToken, ip, userAgent, user: user._id };
-      await Token.create(refreshTokenPayload);
+
+      if (existingToken) {
+        // Update existing invalid token
+        existingToken.refreshToken = refreshToken;
+        existingToken.isValid = true;
+        existingToken.ip = ip;
+        existingToken.userAgent = userAgent;
+        await existingToken.save();
+      } else {
+        // Create new token
+        await Token.create({
+          refreshToken,
+          ip,
+          userAgent,
+          user: user._id,
+        });
+      }
     }
 
     // Attach tokens to response
@@ -330,7 +343,9 @@ const forgotPassword = async (req, res, next) => {
     if (!email) {
       throw new CustomError.BadRequestError("Please provide email");
     }
+    console.log("Forgot password request received here", email);
     const user = await User.findOne({ email });
+
     const resetToken = crypto.randomBytes(70).toString("hex");
     const expirationDate = new Date(Date.now() + 1000 * 60 * 60);
     if (user) {
@@ -355,6 +370,7 @@ const forgotPassword = async (req, res, next) => {
 const resetPassword = async (req, res, next) => {
   try {
     const { email, verificationToken, password } = req.body;
+    console.log("Reset password request received here", email, verificationToken, password);
     if (!email || !verificationToken || !password) {
       throw new CustomError.BadRequestError("Please provide all credentials");
     }
