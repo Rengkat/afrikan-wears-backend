@@ -90,7 +90,6 @@ const StylistSchema = new mongoose.Schema(
       type: String,
       unique: true,
       lowercase: true,
-      index: true,
     },
 
     isCompanyVerified: {

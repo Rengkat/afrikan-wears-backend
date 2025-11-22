@@ -322,7 +322,81 @@ const getAllProducts = async (req, res, next) => {
     next(error);
   }
 };
+const getMyProducts = async (req, res, next) => {
+  try {
+    const { role, company, userId } = req.user;
+    const { page = 1, limit = 10, status, category, type, featured } = req.query;
 
+    // Only stylists can access this endpoint
+    if (role !== "stylist") {
+      throw new CustomError.UnauthorizedError("Only stylists can access their products");
+    }
+
+    // Create cache key specific to stylist's products
+    const cacheKey = `myproducts:${company}:${page}:${limit}:${status || ""}:${category || ""}:${
+      type || ""
+    }:${featured || ""}`;
+
+    // Try cache first
+    const cachedData = await getFromCache(cacheKey);
+    if (cachedData) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        ...cachedData,
+      });
+    }
+
+    const query = {
+      stylist: company,
+      createdBy: "stylist", // Only products they created
+    };
+
+    // Additional filters
+    if (status && ["pending", "approved", "rejected"].includes(status)) {
+      query.status = status;
+    }
+    if (category) query.category = category;
+    if (type) query.type = type;
+    if (featured) query.featured = featured === "true";
+
+    // Pagination
+    const skip = (page - 1) * limit;
+
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .select(
+          "name price mainImage rating category featured status stock createdAt rejectionReason"
+        )
+        .populate("stylist", "name")
+        .populate("approvedBy", "name")
+        .sort({ createdAt: -1 }) // Newest first
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(query),
+    ]);
+
+    const responseData = {
+      count: products.length,
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / limit),
+      products,
+    };
+
+    // Cache for 30 minutes (stylist products change more frequently)
+    await setInCache(cacheKey, responseData, 1800);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      fromCache: false,
+      ...responseData,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 const getDetailProduct = async (req, res, next) => {
   try {
     const { productId: id } = req.params;
@@ -391,6 +465,28 @@ const updateProduct = async (req, res, next) => {
       throw new CustomError.UnauthorizedError("Customers cannot update products");
     }
 
+    // Track images to delete if they're being replaced
+    const imagesToDelete = [];
+
+    // Check if main image is being updated and delete old one from Sanity
+    if (updateData.mainImage && updateData.mainImage !== product.mainImage) {
+      if (product.mainImage && product.mainImage.includes("cdn.sanity.io")) {
+        imagesToDelete.push(product.mainImage);
+      }
+    }
+
+    // Check if subImages are being updated and delete removed ones from Sanity
+    if (updateData.subImages && Array.isArray(updateData.subImages)) {
+      const removedSubImages = product.subImages.filter(
+        (oldImage) => !updateData.subImages.includes(oldImage)
+      );
+      removedSubImages.forEach((imageUrl) => {
+        if (imageUrl && imageUrl.includes("cdn.sanity.io")) {
+          imagesToDelete.push(imageUrl);
+        }
+      });
+    }
+
     // Prevent SKU updates
     if (updateData.sku && updateData.sku !== product.sku) {
       throw new CustomError.BadRequestError("SKU cannot be changed");
@@ -437,19 +533,29 @@ const updateProduct = async (req, res, next) => {
     await product.save({ session });
     await session.commitTransaction();
 
+    // DELETE OLD IMAGES FROM SANITY (after successful update)
+    if (imagesToDelete.length > 0) {
+      for (const imageUrl of imagesToDelete) {
+        try {
+          await deleteSanityImageByUrl(imageUrl);
+          console.log(`Deleted old image from Sanity: ${imageUrl}`);
+        } catch (error) {
+          console.warn(`Failed to delete old image ${imageUrl}:`, error.message);
+          // Continue even if image deletion fails
+        }
+      }
+    }
+
     // Clear cache and notify relevant parties
     await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
-
-    // Notify stylist if status changed
-    // if (updateData.status && product.createdBy === "stylist") {
-    //   const stylist = await User.findById(product.stylist);
-    //   emitProductNotification(io, product, updateData.status, req.user);
-    // }
 
     res.status(StatusCodes.OK).json({
       success: true,
       product,
-      message: "Product updated successfully",
+      message:
+        "Product updated successfully" +
+        (imagesToDelete.length > 0 ? " and old images cleaned up" : ""),
+      deletedImagesCount: imagesToDelete.length,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -481,7 +587,7 @@ const deleteProduct = async (req, res, next) => {
       if (product.stylist.toString() !== company.toString() || product.status !== "pending") {
         throw new CustomError.UnauthorizedError("You can only delete your own pending products");
       }
-    } else if (role === "customer") {
+    } else if (role === "user") {
       throw new CustomError.UnauthorizedError("Customers cannot delete products");
     }
 
@@ -490,20 +596,61 @@ const deleteProduct = async (req, res, next) => {
       throw new CustomError.BadRequestError("Cannot delete product with reviews");
     }
 
+    // DELETE ALL ASSOCIATED IMAGES FROM SANITY
+    const imagesToDelete = [];
+
+    // Add main image if it's from Sanity
+    if (product.mainImage && product.mainImage.includes("cdn.sanity.io")) {
+      imagesToDelete.push(product.mainImage);
+    }
+
+    // Add sub images if they're from Sanity
+    if (product.subImages && product.subImages.length > 0) {
+      product.subImages.forEach((imageUrl) => {
+        if (imageUrl && imageUrl.includes("cdn.sanity.io")) {
+          imagesToDelete.push(imageUrl);
+        }
+      });
+    }
+
+    // Delete all images from Sanity
+    if (imagesToDelete.length > 0) {
+      for (const imageUrl of imagesToDelete) {
+        try {
+          await deleteSanityImageByUrl(imageUrl);
+          console.log(`Deleted image from Sanity: ${imageUrl}`);
+        } catch (error) {
+          console.warn(`Failed to delete image from Sanity: ${imageUrl}`, error.message);
+          // Continue with product deletion even if image deletion fails
+        }
+      }
+    }
+
+    // Now delete the product from database
     await Product.findByIdAndDelete(id).session(session);
     await session.commitTransaction();
 
-    // Clear cache and notify
+    // Clear cache
     await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
 
     // Notify if product was deleted by admin
-    // if (role === "admin" && product.createdBy === "stylist") {
-    //   emitProductNotification(io, product, "deleted", req.user);
-    // }
+    if (role === "admin" && product.createdBy === "stylist") {
+      const notificationPayload = {
+        type: "product_deleted",
+        message: `Your product "${product.name}" was deleted by admin`,
+        data: {
+          productId: product._id,
+          productName: product.name,
+          deletedAt: new Date(),
+        },
+      };
+      emitNotification(req.io, "newNotification", notificationPayload, product.stylist.toString());
+    }
 
     res.status(StatusCodes.OK).json({
       success: true,
-      message: "Product deleted successfully",
+      message: "Product and all associated images deleted successfully",
+      deletedImagesCount: imagesToDelete.length,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -560,6 +707,30 @@ const uploadProductImage = async (req, res, next) => {
         console.error("Error deleting temp file:", e);
       }
     }
+  }
+};
+const deleteProductImage = async (req, res, next) => {
+  try {
+    const { imageUrl } = req.body;
+
+    if (!imageUrl) {
+      throw new CustomError.BadRequestError("Image URL is required");
+    }
+
+    if (!imageUrl.includes("cdn.sanity.io")) {
+      throw new CustomError.BadRequestError("Only Sanity images can be deleted");
+    }
+
+    const deletedAssetId = await deleteSanityImageByUrl(imageUrl);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Image deleted successfully from Sanity",
+      deletedAssetId,
+      imageUrl,
+    });
+  } catch (error) {
+    next(error);
   }
 };
 const addReview = async (req, res, next) => {
@@ -683,14 +854,48 @@ const updateReview = async (req, res, next) => {
     session.endSession();
   }
 };
+// Helper function to delete image from Sanity by URL
+const deleteSanityImageByUrl = async (imageUrl) => {
+  if (!imageUrl || !imageUrl.includes("cdn.sanity.io")) {
+    return null; // Only process Sanity images
+  }
 
+  try {
+    // Extract asset ID from Sanity image URL
+    // URL format: https://cdn.sanity.io/images/projectId/dataset/image-id-500x500.jpg
+    const urlParts = imageUrl.split("/");
+    const imageIdWithParams = urlParts[urlParts.length - 1];
+    const imageId = imageIdWithParams.split("?")[0].split("-")[0];
+
+    if (!imageId) {
+      throw new Error("Invalid Sanity image URL format");
+    }
+
+    const assetId = `image-${imageId}`;
+
+    // Delete the asset from Sanity
+    await writeClient.delete(assetId);
+
+    console.log(`Successfully deleted image from Sanity: ${assetId}`);
+    return assetId;
+  } catch (error) {
+    if (error.statusCode === 404) {
+      console.warn(`Image already deleted from Sanity: ${imageUrl}`);
+      return null;
+    }
+    console.error(`Failed to delete image from Sanity: ${imageUrl}`, error);
+    throw error;
+  }
+};
 module.exports = {
   addProduct,
   getAllProducts,
+  getMyProducts,
   getDetailProduct,
   updateProduct,
   deleteProduct,
   uploadProductImage,
+  deleteProductImage,
   addReview,
   updateReview,
   verifyProduct,

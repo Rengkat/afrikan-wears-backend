@@ -14,6 +14,8 @@ const {
   addReview,
   updateReview,
   verifyProduct,
+  getMyProducts,
+  deleteProductImage,
 } = require("../controllers/productController");
 const router = express.Router();
 
@@ -27,8 +29,15 @@ router
   .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), addProduct);
 
 router
+  .route("/my-products")
+  .get(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), getMyProducts);
+
+router
   .route("/upload-product-image")
   .post(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), uploadProductImage);
+router
+  .route("/delete-product-image")
+  .delete(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), deleteProductImage);
 
 router
   .route("/:productId")
