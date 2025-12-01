@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-
+const generateSKU = require("../utils/skuGenerator");
 const ProductSchema = new mongoose.Schema(
   {
     name: {
@@ -29,7 +29,6 @@ const ProductSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
-    originalPrice: Number,
     minPrice: Number,
     maxPrice: Number,
 
@@ -53,11 +52,11 @@ const ProductSchema = new mongoose.Schema(
     ],
 
     // Variants
-    sizes: [String],
-    colors: [String],
+
     attributes: {
-      type: Map,
-      of: String,
+      color: String,
+      size: String,
+      material: String,
     },
 
     // Relationships
@@ -118,7 +117,7 @@ const ProductSchema = new mongoose.Schema(
 
     category: {
       type: String,
-      enum: ["men", "women", "unisex",'material'],
+      enum: ["men", "women", "unisex", "material"],
       required: true,
     },
     type: {
@@ -146,6 +145,10 @@ const ProductSchema = new mongoose.Schema(
 ProductSchema.pre("save", function (next) {
   if (!this.slug) {
     this.slug = this.name.toLowerCase().replace(/\s+/g, "-");
+  }
+  // Generate SKU if not present
+  if (!this.sku) {
+    this.sku = generateSKU(this.category, this.name);
   }
   next();
 });

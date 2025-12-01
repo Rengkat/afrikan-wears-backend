@@ -256,26 +256,29 @@ const getAllStylists = async (req, res, next) => {
 const getSingleStylist = async (req, res, next) => {
   try {
     const { id } = req.params;
-
     const cacheKey = `stylist:${id}`;
-    //get from cache first
+
+    // Get from cache first
     const cachedStylist = await getFromCache(cacheKey);
-    if (cacheKey) {
+    if (cachedStylist) {
       return res.status(StatusCodes.OK).json({
         success: true,
         fromCache: true,
         stylist: cachedStylist,
       });
     }
-    const stylist = await Stylist.findById(id).lean();
 
+    const stylist = await Stylist.findById(id).lean();
     if (!stylist) {
       throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
-    //add to cache
-    await setInCache(cacheKey, stylist.toOject());
+
+    // Add to cache
+    await setInCache(cacheKey, stylist);
+
     res.status(StatusCodes.OK).json({
       success: true,
+      fromCache: false,
       stylist,
     });
   } catch (error) {
@@ -427,8 +430,8 @@ const deleteStylist = async (req, res, next) => {
     }
 
     await session.commitTransaction();
-    // clear both the specific stylist cache and the stylist cache
-    await Promise.all([clearCache(`stylist${id}`), clearCache(`stylist:*`)]);
+    // Clear both the specific stylist cache and the stylist cache
+    await Promise.all([clearCache(`stylist:${id}`), clearCache("stylist:*")]);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -684,6 +687,7 @@ const removePortfolioImage = async (req, res, next) => {
 
 module.exports = {
   addStylist,
+  verifyStylistCompany,
   getAllStylists,
   getSingleStylist,
   updateStylist,

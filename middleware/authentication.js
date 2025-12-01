@@ -4,6 +4,7 @@ const Token = require("../models/tokenModel");
 const crypto = require("crypto");
 const User = require("../models/userModel");
 
+// Main authentication middleware (unchanged - looks good)
 const authenticateUser = async (req, res, next) => {
   try {
     const { accessToken, refreshToken } = req.signedCookies;
@@ -36,12 +37,21 @@ const authenticateUser = async (req, res, next) => {
           throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
         }
 
-        // Refresh token is valid - rotate tokens
+        // Refresh token is valid - rotate tokens (create new one)
         const newRefreshToken = crypto.randomBytes(40).toString("hex");
-        existingRefreshToken.refreshToken = newRefreshToken;
+
+        // Create new token and invalidate old one
+        await Token.create({
+          refreshToken: newRefreshToken,
+          user: payload.accessToken.id,
+          isValid: true,
+        });
+
+        // Optionally: Invalidate old token
+        existingRefreshToken.isValid = false;
         await existingRefreshToken.save();
 
-        // Find user - FIXED: added await
+        // Find user
         const user = await User.findById(payload.accessToken.id).select("-password");
         if (!user) {
           console.log("User not found for refresh token");
@@ -62,7 +72,7 @@ const authenticateUser = async (req, res, next) => {
       } catch (refreshTokenError) {
         console.log("Refresh token validation failed:", refreshTokenError.message);
 
-        // Only clear cookies for specific JWT errors, not all errors
+        // Only clear cookies for specific JWT errors
         if (
           refreshTokenError.name === "JsonWebTokenError" ||
           refreshTokenError.name === "TokenExpiredError"
@@ -102,56 +112,82 @@ const clearAuthCookies = (res) => {
   res.cookie("refreshToken", "", { ...options, maxAge: 0 });
 };
 
-const restrictToUser = (...roles) => {
+// Generic authorization middleware
+const authorize = (...allowedRoles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      throw new CustomError.UnauthorizedError("Only customers can perform this action");
+    if (!allowedRoles.includes(req.user.role)) {
+      throw new CustomError.UnauthorizedError(
+        `Unauthorized. Allowed roles: ${allowedRoles.join(", ")}`
+      );
     }
     next();
   };
 };
 
-const adminAuthorization = async (req, res, next) => {
-  try {
-    if (req.user.role !== "admin") {
-      throw new CustomError.UnauthorizedError("Not authorized to access this route");
-    }
-    next();
-  } catch (error) {
-    next(error);
+// Admin authorization
+const adminAuthorization = (req, res, next) => {
+  if (req.user.role !== "admin") {
+    throw new CustomError.UnauthorizedError("Admin access required");
   }
+  next();
 };
 
-const stylistAuthorization = async (req, res, next) => {
-  try {
-    if (req.user.role !== "stylist") {
-      throw new CustomError.UnauthenticatedError(
-        "Not authorized to access this route. Only for stylist"
-      );
-    }
-    next();
-  } catch (error) {
-    next(error);
+// Stylist authorization
+const stylistAuthorization = (req, res, next) => {
+  if (req.user.role !== "stylist") {
+    throw new CustomError.UnauthorizedError("Stylist access required");
   }
+  next();
 };
 
+// Customer authorization
+const customerAuthorization = (req, res, next) => {
+  if (req.user.role !== "user") {
+    throw new CustomError.UnauthorizedError("Customer access required");
+  }
+  next();
+};
+
+// Improved ownership check with better validation
+const checkStylistOwnership = (req, res, next) => {
+  const { id } = req.params;
+  const { role, company } = req.user;
+
+  // Admin can access any stylist
+  if (role === "admin") {
+    return next();
+  }
+
+  // If not a stylist, cannot access stylist resources
+  if (role !== "stylist") {
+    throw new CustomError.UnauthorizedError("Only stylists can access this resource");
+  }
+
+  // Check if stylist is accessing their own company
+  if (!company || company.toString() !== id) {
+    throw new CustomError.UnauthorizedError("You can only access your own company");
+  }
+
+  next();
+};
+
+// Optional: Combined authorization (for backward compatibility)
 const adminAndStylistAuthorization = (...roles) => {
-  return async (req, res, next) => {
-    try {
-      if (!roles.includes(req.user.role)) {
-        return next(new CustomError.UnauthorizedError("You are not authorized!"));
-      }
-      next();
-    } catch (error) {
-      next(error);
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      throw new CustomError.UnauthorizedError("You are not authorized!");
     }
+    next();
   };
 };
 
 module.exports = {
   authenticateUser,
+  authorize,
   adminAuthorization,
   stylistAuthorization,
+  customerAuthorization,
   adminAndStylistAuthorization,
-  restrictToUser,
+  checkStylistOwnership,
+  clearAuthCookies,
 };

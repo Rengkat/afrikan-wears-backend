@@ -29,7 +29,19 @@ const addProduct = async (req, res, next) => {
       attributes,
       type,
     } = req.body;
-
+    console.log(
+      name,
+      price,
+      mainImage,
+      subImages,
+      category,
+      description,
+      stock,
+      rating,
+      featured,
+      attributes,
+      type
+    );
     // Get user info from auth middleware
     const { role, company, userId } = req.user;
 
@@ -66,15 +78,6 @@ const addProduct = async (req, res, next) => {
       );
     }
 
-    // Generate a unique SKU
-    const sku = generateSKU(category, name);
-
-    // Check if SKU already exists
-    const existingProduct = await Product.findOne({ sku }).session(session);
-    if (existingProduct) {
-      throw new CustomError.BadRequestError("Product with this SKU already exists");
-    }
-
     // Create product
     const product = await Product.create(
       [
@@ -84,7 +87,6 @@ const addProduct = async (req, res, next) => {
           mainImage,
           subImages: subImages || [],
           stylist: stylistId,
-          sku,
           category,
           type,
           description,

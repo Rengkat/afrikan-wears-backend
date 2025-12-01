@@ -13,15 +13,15 @@ const {
 const {
   authenticateUser,
   adminAuthorization,
-  restrictToUser,
   adminAndStylistAuthorization,
+  authorize,
 } = require("../middleware/authentication");
 
 const router = express.Router();
 // Customer routes
 router
   .route("/")
-  .post(authenticateUser, restrictToUser("user"), createOrder)
+  .post(authenticateUser, authorize("user"), createOrder)
   .get(authenticateUser, adminAuthorization, getAllOrders);
 router.get("/my-orders", authenticateUser, getMyOrders);
 

@@ -6,17 +6,17 @@ const {
   removeFromWishlist,
   moveToCart,
 } = require("../controllers/wishlistController");
-const { authenticateUser, restrictToUser } = require("../middleware/authentication");
+const { authenticateUser, authorize } = require("../middleware/authentication");
 
 router.use(authenticateUser);
 
 router
   .route("/")
-  .post(authenticateUser, restrictToUser("user"), addToWishlist)
-  .get(authenticateUser, restrictToUser("user"), getMyWishlist);
+  .post(authenticateUser, authorize("user"), addToWishlist)
+  .get(authenticateUser, authorize("user"), getMyWishlist);
 
-router.route("/:productId").delete(authenticateUser, restrictToUser("user"), removeFromWishlist);
+router.route("/:productId").delete(authenticateUser, authorize("user"), removeFromWishlist);
 
-router.route("/move-to-cart").post(authenticateUser, restrictToUser("user"), moveToCart);
+router.route("/move-to-cart").post(authenticateUser, authorize("user"), moveToCart);
 
 module.exports = router;
