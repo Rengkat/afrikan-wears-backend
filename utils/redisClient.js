@@ -5,7 +5,7 @@ let client;
 let isConnected = false;
 
 const connectRedis = async () => {
-  if (isConnected) return;
+  if (isConnected && client?.isReady) return;
 
   try {
     client = createClient({
@@ -17,6 +17,7 @@ const connectRedis = async () => {
 
     client.on("error", (err) => {
       console.error("Redis Client Error", err);
+      isConnected = false;
     });
 
     client.on("connect", () => {
@@ -32,58 +33,117 @@ const connectRedis = async () => {
     await client.connect();
   } catch (error) {
     console.error("Redis connection failed:", error);
-    throw new CustomError.BadRequestError("Cache service unavailable");
+    // Don't throw - just log, cache is optional
+    isConnected = false;
   }
 };
 
 const getFromCache = async (key) => {
-  if (!isConnected) return null;
+  if (!isConnected || !client?.isReady) {
+    console.log("[CACHE] Skipping get - Redis not ready");
+    return null;
+  }
 
   try {
     const data = await client.get(key);
     return data ? JSON.parse(data) : null;
   } catch (error) {
     console.error("Cache read error:", error);
-    return null; // Fail gracefully instead of throwing
+    return null;
   }
 };
 
 const setInCache = async (key, value, ttl = 3600) => {
-  if (!isConnected) return;
+  if (!isConnected || !client?.isReady) {
+    console.log("[CACHE] Skipping set - Redis not ready");
+    return false;
+  }
 
   try {
     await client.set(key, JSON.stringify(value), {
       EX: ttl,
     });
+    return true;
   } catch (error) {
     console.error("Cache write error:", error);
+    return false;
   }
 };
 
-const clearCache = async (key) => {
-  if (!isConnected) return;
+// ✅ FIXED: Returns number of deleted keys
+const clearCache = async (pattern) => {
+  if (!isConnected || !client?.isReady) {
+    console.log("[CACHE] Skipping clear - Redis not ready");
+    return 0;
+  }
 
   try {
-    if (key.endsWith("*")) {
-      const keys = await client.keys(key);
-      if (keys.length) await client.del(keys);
+    let deletedCount = 0;
+
+    console.log(`[CACHE] Clearing pattern: "${pattern}"`);
+
+    if (pattern.includes("*")) {
+      // Use SCAN for better performance with wildcards
+      const keys = [];
+      let cursor = 0;
+
+      do {
+        const result = await client.scan(cursor, {
+          MATCH: pattern,
+          COUNT: 100,
+        });
+        cursor = result.cursor;
+        keys.push(...result.keys);
+      } while (cursor !== 0);
+
+      console.log(`[CACHE] Found ${keys.length} keys matching "${pattern}"`);
+
+      if (keys.length > 0) {
+        // Delete in batches to avoid blocking
+        const batchSize = 100;
+        for (let i = 0; i < keys.length; i += batchSize) {
+          const batch = keys.slice(i, i + batchSize);
+          const deleted = await client.del(batch);
+          deletedCount += deleted;
+        }
+        console.log(`[CACHE] Deleted ${deletedCount} keys`);
+      }
     } else {
-      await client.del(key);
+      // Exact key match
+      const deleted = await client.del(pattern);
+      deletedCount = deleted > 0 ? 1 : 0;
+      console.log(`[CACHE] Deleted exact key: "${pattern}"`);
     }
+
+    return deletedCount;
   } catch (error) {
-    console.error("Cache clear error:", error);
+    console.error("[CACHE] Clear error:", error);
+    return -1;
   }
 };
 
 const flushAll = async () => {
-  if (!isConnected) return;
+  if (!isConnected || !client?.isReady) {
+    console.log("[CACHE] Skipping flush - Redis not ready");
+    return false;
+  }
 
   try {
     await client.flushAll();
+    console.log("[CACHE] Flushed all cache");
+    return true;
   } catch (error) {
     console.error("Cache flush error:", error);
+    return false;
   }
 };
+
+// Export for direct access if needed
+const getRedisClient = () => client;
+const getRedisStatus = () => ({
+  isConnected,
+  isReady: client?.isReady || false,
+});
 
 module.exports = {
   connectRedis,
@@ -91,6 +151,8 @@ module.exports = {
   setInCache,
   clearCache,
   flushAll,
+  getRedisClient,
+  getRedisStatus,
   client,
   isConnected,
 };

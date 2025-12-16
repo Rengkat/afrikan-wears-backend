@@ -15,36 +15,31 @@ const {
   updateStylist,
   updateStylistProfile,
   deleteStylist,
-  verifyStylistCompany, // ADD THIS - missing controller
+  verifyStylistCompany,
   uploadStylistAvatar,
   uploadStylistBanner,
   addPortfolioImage,
   removePortfolioImage,
+  getMyStylistProfile,
 } = require("../controllers/stylistController");
 
-// ==================== PUBLIC ROUTES ====================
 router.route("/").get(getAllStylists);
+router.route("/").post(authenticateUser, adminAuthorization, addStylist);
+
+router.get("/my/profile", authenticateUser, stylistAuthorization, getMyStylistProfile);
 router.route("/:id").get(getSingleStylist);
 
-// ==================== ADMIN-ONLY ROUTES ====================
-router.route("/").post(authenticateUser, adminAuthorization, addStylist);
-router.route("/verify/:id").patch(authenticateUser, adminAuthorization, verifyStylistCompany); // ADD THIS
+router.route("/verify/:id").patch(authenticateUser, adminAuthorization, verifyStylistCompany);
 router.route("/:id").delete(authenticateUser, adminAuthorization, deleteStylist);
 
-// ==================== STYLIST MANAGEMENT ROUTES ====================
-// Admin can update any stylist, stylist can only update their own
 router
   .route("/:id")
   .patch(authenticateUser, authorize("admin", "stylist"), checkStylistOwnership, updateStylist);
 
-// ==================== STYLIST-ONLY PROFILE ROUTES ====================
-// Stylist can only update their own profile
 router
   .route("/:id/profile")
   .patch(authenticateUser, stylistAuthorization, checkStylistOwnership, updateStylistProfile);
 
-// ==================== IMAGE UPLOAD ROUTES ====================
-// Admin can upload for any, stylist only for their own
 router
   .route("/:id/upload-avatar")
   .post(

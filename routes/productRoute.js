@@ -21,7 +21,6 @@ const router = express.Router();
 
 // Public routes
 router.route("/").get(getAllProducts);
-router.route("/:productId").get(getDetailProduct);
 
 // Protected routes
 router
@@ -38,7 +37,7 @@ router
 router
   .route("/delete-product-image")
   .delete(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), deleteProductImage);
-
+router.route("/:productId").get(getDetailProduct);
 router
   .route("/:productId")
   .patch(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), updateProduct)

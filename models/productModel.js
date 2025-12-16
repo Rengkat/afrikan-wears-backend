@@ -54,8 +54,13 @@ const ProductSchema = new mongoose.Schema(
     // Variants
 
     attributes: {
-      color: String,
-      size: String,
+      colors: [
+        {
+          name: String,
+          hexCode: String,
+        },
+      ],
+      sizes: [String],
       material: String,
     },
 
@@ -96,10 +101,15 @@ const ProductSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    createdBy: {
+      enmum: ["stylist", "admin"],
+      type: String,
+      default: "stylist",
+      required: true,
+    },
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
     },
     rejectionReason: String,
 
@@ -130,7 +140,7 @@ const ProductSchema = new mongoose.Schema(
     // Status
     status: {
       type: String,
-      enum: ["draft", "published", "archived"],
+      enum: ["draft", "pending", "approved", "rejected", "published", "archived"],
       default: "draft",
     },
   },

@@ -1,5 +1,7 @@
 const CustomError = require("../errors");
 const Notification = require("../models/notificationModel");
+const mongoose = require("mongoose");
+const User = require("../models/userModel");
 // Standardized notification emitter
 const emitNotification = async (io, eventName, payload, target) => {
   if (!io) {
@@ -11,6 +13,38 @@ const emitNotification = async (io, eventName, payload, target) => {
   }
 
   try {
+    if (target === "admin_room") {
+      // Get all admin users
+      const adminUsers = await User.find({ role: "admin" }).select("_id").lean();
+
+      // Create notification for each admin
+      const notificationPromises = adminUsers.map(async (admin) => {
+        try {
+          const notification = await Notification.create({
+            recipient: admin._id,
+            type: payload.type,
+            message: payload.message,
+            data: payload.data,
+            recipientModel: "User",
+          });
+          return notification;
+        } catch (err) {
+          console.error(`Failed to create notification for admin ${admin._id}:`, err.message);
+          return null;
+        }
+      });
+
+      const notifications = (await Promise.all(notificationPromises)).filter((n) => n !== null);
+
+      // Emit to admin room
+      io.to("admin_room").emit(eventName, {
+        ...payload,
+        notifications: notifications.map((n) => n._id),
+      });
+
+      console.log(`Admin notification stored for ${notifications.length} admins`);
+      return;
+    }
     // Persist notification to database
     const notification = await Notification.create({
       recipient: target,

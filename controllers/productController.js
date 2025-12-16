@@ -163,7 +163,7 @@ const verifyProduct = async (req, res, next) => {
 
     if (action === "approve") {
       product.isAdminApproved = true;
-      product.status = "approved";
+      product.status = "published";
       product.approvedBy = userId;
       product.rejectionReason = undefined;
       // Notify stylist
@@ -351,7 +351,7 @@ const getMyProducts = async (req, res, next) => {
 
     const query = {
       stylist: company,
-      createdBy: "stylist", // Only products they created
+      // createdBy: "stylist", // Only products they created
     };
 
     // Additional filters
@@ -568,9 +568,10 @@ const updateProduct = async (req, res, next) => {
 };
 const deleteProduct = async (req, res, next) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
+  let transactionCommitted = false;
 
   try {
+    await session.startTransaction();
     const { productId: id } = req.params;
     const { role, company } = req.user;
 
@@ -585,7 +586,6 @@ const deleteProduct = async (req, res, next) => {
 
     // Role-based deletion restrictions
     if (role === "stylist") {
-      // Stylists can only delete their own pending products
       if (product.stylist.toString() !== company.toString() || product.status !== "pending") {
         throw new CustomError.UnauthorizedError("You can only delete your own pending products");
       }
@@ -593,20 +593,15 @@ const deleteProduct = async (req, res, next) => {
       throw new CustomError.UnauthorizedError("Customers cannot delete products");
     }
 
-    // Check if product has any reviews (only if not admin)
     if (role !== "admin" && product.reviews.length > 0) {
       throw new CustomError.BadRequestError("Cannot delete product with reviews");
     }
 
     // DELETE ALL ASSOCIATED IMAGES FROM SANITY
     const imagesToDelete = [];
-
-    // Add main image if it's from Sanity
     if (product.mainImage && product.mainImage.includes("cdn.sanity.io")) {
       imagesToDelete.push(product.mainImage);
     }
-
-    // Add sub images if they're from Sanity
     if (product.subImages && product.subImages.length > 0) {
       product.subImages.forEach((imageUrl) => {
         if (imageUrl && imageUrl.includes("cdn.sanity.io")) {
@@ -623,17 +618,62 @@ const deleteProduct = async (req, res, next) => {
           console.log(`Deleted image from Sanity: ${imageUrl}`);
         } catch (error) {
           console.warn(`Failed to delete image from Sanity: ${imageUrl}`, error.message);
-          // Continue with product deletion even if image deletion fails
         }
       }
     }
 
-    // Now delete the product from database
+    // Delete the product from database
     await Product.findByIdAndDelete(id).session(session);
-    await session.commitTransaction();
 
-    // Clear cache
-    await Promise.all([clearCache(`product:${id}`), clearCache("products:*")]);
+    // ✅ COMMIT THE TRANSACTION FIRST
+    await session.commitTransaction();
+    transactionCommitted = true;
+    console.log("Database transaction committed successfully");
+
+    // ✅ THEN CLEAR CACHE WITH FIXED REDIS FUNCTIONS
+    const cachePatterns = [
+      `product:${id}`,
+      "products:*",
+      `myproducts:${company}:*`,
+      `myproducts:${company}:1:*`,
+      `myproducts:*`,
+    ];
+
+    console.log(`[CACHE] Starting cache clear for company ${company}`);
+
+    let totalCleared = 0;
+    const cacheResults = {};
+
+    for (const pattern of cachePatterns) {
+      try {
+        const cleared = await clearCache(pattern);
+        cacheResults[pattern] = cleared;
+
+        if (cleared > 0) {
+          totalCleared += cleared;
+          console.log(`[CACHE] ✅ Cleared ${cleared} keys for "${pattern}"`);
+        } else if (cleared === 0) {
+          console.log(`[CACHE] ℹ️  No keys found for "${pattern}"`);
+        } else if (cleared === -1) {
+          console.log(`[CACHE] ❌ Error clearing "${pattern}"`);
+        }
+      } catch (error) {
+        console.error(`[CACHE] Failed to clear "${pattern}":`, error.message);
+        cacheResults[pattern] = "error";
+      }
+    }
+
+    // Optional: Force immediate cache check
+    if (totalCleared === 0) {
+      console.log(`[CACHE WARNING] No cache keys were cleared!`);
+      console.log(`[CACHE DEBUG] Testing cache manually...`);
+
+      // Test if we can access Redis
+      const testKey = `test:${Date.now()}`;
+      const testSet = await setInCache(testKey, { test: "data" }, 10);
+      const testGet = await getFromCache(testKey);
+      console.log(`[CACHE DEBUG] Test set: ${testSet}, Test get:`, testGet);
+    }
 
     // Notify if product was deleted by admin
     if (role === "admin" && product.createdBy === "stylist") {
@@ -653,9 +693,16 @@ const deleteProduct = async (req, res, next) => {
       success: true,
       message: "Product and all associated images deleted successfully",
       deletedImagesCount: imagesToDelete.length,
+      cacheCleared: totalCleared > 0,
+      totalCacheKeysCleared: totalCleared,
+      cacheResults, // Include detailed results
     });
   } catch (error) {
-    await session.abortTransaction();
+    // Only abort if transaction wasn't committed
+    if (session.inTransaction() && !transactionCommitted) {
+      await session.abortTransaction();
+      console.log("Transaction aborted due to error");
+    }
     next(error);
   } finally {
     session.endSession();

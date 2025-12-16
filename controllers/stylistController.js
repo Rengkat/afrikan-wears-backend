@@ -201,7 +201,7 @@ const verifyStylistCompany = async (req, res, next) => {
 
 const getAllStylists = async (req, res, next) => {
   try {
-    const { company, specialty, page = 1, limit = 10 } = req.query;
+    const { company, specialty, page = 1, limit = 10, isCompanyVerified } = req.query;
     const cacheKey = `stylist:${company || ""}:${specialty || ""}:${page}:${limit}`;
 
     // Check cache
@@ -248,6 +248,45 @@ const getAllStylists = async (req, res, next) => {
       success: true,
       fromCache: false,
       ...responseData,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getMyStylistProfile = async (req, res, next) => {
+  try {
+    const { company } = req.user; // Get company ID from authenticated user
+
+    if (!company) {
+      throw new CustomError.UnauthorizedError("You are not associated with any stylist company");
+    }
+
+    const cacheKey = `stylist:${company}`;
+
+    // Check cache
+    const cachedStylist = await getFromCache(cacheKey);
+    if (cachedStylist) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        stylist: cachedStylist,
+      });
+    }
+
+    const stylist = await Stylist.findById(company).populate("owner", "name email avatar").lean();
+
+    if (!stylist) {
+      throw new CustomError.NotFoundError("Stylist profile not found");
+    }
+
+    // Add to cache
+    await setInCache(cacheKey, stylist, 3600); // Cache for 1 hour
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      fromCache: false,
+      stylist,
     });
   } catch (error) {
     next(error);
@@ -690,6 +729,7 @@ module.exports = {
   verifyStylistCompany,
   getAllStylists,
   getSingleStylist,
+  getMyStylistProfile,
   updateStylist,
   updateStylistProfile,
   deleteStylist,
