@@ -75,7 +75,7 @@ const StylistSchema = new mongoose.Schema(
     },
     portfolio: [
       {
-        image: { type: String, required: true }, // URL
+        image: { type: String, required: true }, 
         category: { type: String, required: true },
       },
     ],

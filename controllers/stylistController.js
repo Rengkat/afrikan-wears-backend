@@ -253,11 +253,10 @@ const getAllStylists = async (req, res, next) => {
     next(error);
   }
 };
-
 const getMyStylistProfile = async (req, res, next) => {
   try {
-    const { company } = req.user; // Get company ID from authenticated user
-
+    const { company, id: userId } = req.user;
+    
     if (!company) {
       throw new CustomError.UnauthorizedError("You are not associated with any stylist company");
     }
@@ -274,14 +273,26 @@ const getMyStylistProfile = async (req, res, next) => {
       });
     }
 
-    const stylist = await Stylist.findById(company).populate("owner", "name email avatar").lean();
+    const stylist = await Stylist.findById(company)
+      .populate("owner", "name email avatar")
+      .populate("verifiedBy", "name")
+      .lean();
 
     if (!stylist) {
       throw new CustomError.NotFoundError("Stylist profile not found");
     }
 
+    // Ensure documents object exists
+    if (!stylist.documents) {
+      stylist.documents = {
+        cacCertificate: "",
+        businessRegistration: "",
+        taxCertificate: "",
+      };
+    }
+
     // Add to cache
-    await setInCache(cacheKey, stylist, 3600); // Cache for 1 hour
+    await setInCache(cacheKey, stylist, 3600);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -292,6 +303,7 @@ const getMyStylistProfile = async (req, res, next) => {
     next(error);
   }
 };
+
 const getSingleStylist = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -323,7 +335,7 @@ const getSingleStylist = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-};
+}; // ADMIN UPDATE: Full update for any stylist
 const updateStylist = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -331,11 +343,13 @@ const updateStylist = async (req, res, next) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
-    const { role, company } = req.user;
+    const { role } = req.user;
 
-    // Admin can update any stylist, stylist can only update their own company
-    if (role === "stylist" && company.toString() !== id) {
-      throw new CustomError.UnauthorizedError("You can only update your own company");
+    // Only admin can use this endpoint
+    if (role !== "admin") {
+      throw new CustomError.UnauthorizedError(
+        "Only admins can update stylists using this endpoint"
+      );
     }
 
     const stylist = await Stylist.findById(id).session(session);
@@ -343,14 +357,7 @@ const updateStylist = async (req, res, next) => {
       throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
 
-    // Admin-only fields
-    if (role !== "admin") {
-      delete updateData.rating;
-      delete updateData.reviews;
-      delete updateData.owner;
-    }
-
-    // Update fields
+    // Define all updatable fields (admin can update everything)
     const allowedUpdates = [
       "companyName",
       "description",
@@ -362,16 +369,38 @@ const updateStylist = async (req, res, next) => {
       "website",
       "socialMedia",
       "location",
+      "rating",
+      "reviews",
+      "owner",
+      "isVerified",
+      "verificationStatus",
     ];
 
+    // Update fields
     allowedUpdates.forEach((field) => {
       if (updateData[field] !== undefined) {
-        stylist[field] = updateData[field];
+        // Handle nested objects
+        if (
+          (field === "socialMedia" || field === "location") &&
+          typeof updateData[field] === "object"
+        ) {
+          stylist[field] = {
+            ...stylist[field],
+            ...updateData[field],
+          };
+        } else if (field === "services" && Array.isArray(updateData.services)) {
+          // Special handling for services array
+          stylist.services = updateData.services.filter(
+            (service) => typeof service === "string" && service.trim().length > 0
+          );
+        } else {
+          stylist[field] = updateData[field];
+        }
       }
     });
 
-    // Case-insensitive name conflict check
-    if (updateData.companyName) {
+    // Case-insensitive company name conflict check
+    if (updateData.companyName && updateData.companyName !== stylist.companyName) {
       const nameExists = await Stylist.findOne({
         companyName: { $regex: new RegExp(`^${updateData.companyName}$`, "i") },
         _id: { $ne: id },
@@ -401,36 +430,130 @@ const updateStylist = async (req, res, next) => {
   }
 };
 
+// STYLIST PROFILE UPDATE: Stylist updates their own profile only
 const updateStylistProfile = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { id } = req.params;
-    const { role, company } = req.user;
-    const { description, specialty, services, experience } = req.body;
+    const updateData = req.body;
+    const { role, company, id: userId } = req.user;
 
-    // Only allow stylist to update their own profile
-    if (role !== "stylist" || company.toString() !== id) {
+    // Verify it's a stylist
+    if (role !== "stylist") {
+      throw new CustomError.UnauthorizedError("Only stylists can update their profile");
+    }
+
+    // Check ownership (already verified by middleware, but double-check)
+    if (company.toString() !== userId.toString()) {
       throw new CustomError.UnauthorizedError("You can only update your own profile");
     }
 
-    const stylist = await Stylist.findById(id).session(session);
+    const stylist = await Stylist.findById(userId).session(session);
     if (!stylist) {
-      throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
+      throw new CustomError.NotFoundError(`No stylist found with id: ${userId}`);
     }
 
-    // Update only profile-related fields
-    if (description) stylist.description = description;
-    if (specialty) stylist.specialty = specialty;
-    if (services) stylist.services = services;
-    if (experience) stylist.experience = experience;
+    // Double-check ownership via owner field
+    if (stylist.owner.toString() !== userId.toString()) {
+      throw new CustomError.UnauthorizedError("You are not authorized to update this profile");
+    }
+
+    // Define allowed fields for stylist self-update - ADD CAC AND DOCUMENTS
+    const allowedUpdates = [
+      "companyName",
+      "description",
+      "specialty",
+      "experience",
+      "services",
+      "phone",
+      "email",
+      "website",
+      "socialMedia",
+      "location",
+      "cacCertificateNumber", // ADDED
+    ];
+
+    // Remove admin-only fields if somehow included
+    delete updateData.rating;
+    delete updateData.reviews;
+    delete updateData.owner;
+    delete updateData.isVerified;
+    delete updateData.verificationStatus;
+    delete updateData.documents; // Handle separately
+
+    // Handle documents update if provided
+    if (updateData.documents && typeof updateData.documents === "object") {
+      const allowedDocuments = ["cacCertificate", "businessRegistration", "taxCertificate"];
+      allowedDocuments.forEach(docType => {
+        if (updateData.documents[docType] !== undefined) {
+          stylist.documents[docType] = updateData.documents[docType];
+        }
+      });
+    }
+
+    // Update allowed fields
+    allowedUpdates.forEach((field) => {
+      if (updateData[field] !== undefined) {
+        // Handle nested objects
+        if (
+          (field === "socialMedia" || field === "location") &&
+          typeof updateData[field] === "object"
+        ) {
+          stylist[field] = {
+            ...stylist[field],
+            ...updateData[field],
+          };
+        } else if (field === "services" && Array.isArray(updateData.services)) {
+          // Special handling for services array
+          stylist.services = updateData.services.filter(
+            (service) => typeof service === "string" && service.trim().length > 0
+          );
+        } else if (field === "cacCertificateNumber") {
+          // Validate CAC number uniqueness if changed
+          if (updateData[field] && updateData[field] !== stylist.cacCertificateNumber) {
+            // Check CAC uniqueness - we'll validate after saving
+            stylist.cacCertificateNumber = updateData[field].trim();
+          }
+        } else {
+          stylist[field] = updateData[field];
+        }
+      }
+    });
+
+    // Case-insensitive company name conflict check
+    if (updateData.companyName && updateData.companyName !== stylist.companyName) {
+      const nameExists = await Stylist.findOne({
+        companyName: { $regex: new RegExp(`^${updateData.companyName}$`, "i") },
+        _id: { $ne: userId },
+      }).session(session);
+
+      if (nameExists) {
+        throw new CustomError.BadRequestError("Company name already exists");
+      }
+    }
+
+    // CAC number uniqueness check
+    if (updateData.cacCertificateNumber && updateData.cacCertificateNumber !== stylist.cacCertificateNumber) {
+      const cacExists = await Stylist.findOne({
+        cacCertificateNumber: updateData.cacCertificateNumber.trim(),
+        _id: { $ne: userId },
+      }).session(session);
+
+      if (cacExists) {
+        throw new CustomError.BadRequestError("CAC certificate number already registered");
+      }
+    }
 
     await stylist.save({ session });
     await session.commitTransaction();
 
     // Clear cache
-    await Promise.all([clearCache(`stylist:${id}`), clearCache("stylist:*")]);
+    await Promise.all([
+      clearCache(`stylist:${userId}`),
+      clearCache("stylist:*"),
+      clearCache(`user:${userId}`)
+    ]);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -609,7 +732,6 @@ const uploadStylistBanner = async (req, res, next) => {
     }
   }
 };
-
 const addPortfolioImage = async (req, res, next) => {
   let tempFilePath = null;
 
@@ -652,28 +774,30 @@ const addPortfolioImage = async (req, res, next) => {
       },
     });
 
-    const imageUrl = `${uploadResult.url}?w=800&h=800&fit=max`; // High quality for portfolio
+    const imageUrl = `${uploadResult.url}?w=800&h=800&fit=max`;
 
-    // Add to stylist's portfolio
+    // Create portfolio item with proper structure
+    const portfolioItem = {
+      image: imageUrl,
+      category,
+      sanityRef: doc._id,
+    };
+
+    // Add to stylist's portfolio and get updated document
     const stylist = await Stylist.findByIdAndUpdate(
       id,
-      {
-        $push: {
-          portfolio: {
-            image: imageUrl,
-            category,
-            sanityRef: doc._id, // Store Sanity document reference
-          },
-        },
-      },
-      { new: true }
+      { $push: { portfolio: portfolioItem } },
+      { new: true, runValidators: true }
     );
+
+    // Get the newly added portfolio item with its _id
+    const addedItem = stylist.portfolio[stylist.portfolio.length - 1];
 
     await clearCache(`stylist:${id}`);
 
     res.status(StatusCodes.OK).json({
       success: true,
-      portfolio: stylist.portfolio,
+      portfolioItem: addedItem, // Return the added item with _id
       documentId: doc._id,
       message: "Portfolio image added successfully",
     });
@@ -689,7 +813,89 @@ const addPortfolioImage = async (req, res, next) => {
     }
   }
 };
+const uploadStylistDocument = async (req, res, next) => {
+  let tempFilePath = null;
 
+  try {
+    const { id } = req.params;
+    const { role, company } = req.user;
+    const { documentType } = req.body;
+
+    if (role === "stylist" && company.toString() !== id) {
+      throw new CustomError.UnauthorizedError("You can only update your own documents");
+    }
+
+    if (!req.files?.document) {
+      throw new CustomError.BadRequestError("Document file is required");
+    }
+
+    if (!documentType || !["cacCertificate", "businessRegistration", "taxCertificate"].includes(documentType)) {
+      throw new CustomError.BadRequestError("Valid document type is required (cacCertificate, businessRegistration, or taxCertificate)");
+    }
+
+    const documentFile = req.files.document;
+    tempFilePath = documentFile.tempFilePath;
+    const fileBuffer = await fs.readFile(tempFilePath);
+
+    // Validate file type (PDF or images)
+    const validMimeTypes = ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
+    if (!validMimeTypes.includes(documentFile.mimetype)) {
+      throw new CustomError.BadRequestError("Only PDF, JPEG, JPG, and PNG files are allowed");
+    }
+
+    // Upload to Sanity
+    const uploadResult = await writeClient.assets.upload("file", fileBuffer, {
+      filename: documentFile.name,
+      contentType: documentFile.mimetype,
+    });
+
+    // Create reference document
+    const doc = await writeClient.create({
+      _type: "documentStorage",
+      document: {
+        _type: "file",
+        asset: {
+          _type: "reference",
+          _ref: uploadResult._id,
+        },
+        title: `${documentType}_${id}`,
+      },
+    });
+
+    const documentUrl = uploadResult.url;
+
+    // Update stylist's documents object
+    const updateField = `documents.${documentType}`;
+    const stylist = await Stylist.findByIdAndUpdate(
+      id,
+      { [updateField]: documentUrl },
+      { new: true }
+    );
+
+    // Clear cache
+    await Promise.all([
+      clearCache(`stylist:${id}`),
+      clearCache("stylist:*")
+    ]);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      documentUrl,
+      documentType,
+      message: `${documentType.replace(/([A-Z])/g, ' $1')} uploaded successfully`,
+    });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (e) {
+        console.error("Error deleting temp file:", e);
+      }
+    }
+  }
+};
 const removePortfolioImage = async (req, res, next) => {
   try {
     const { id, imageId } = req.params;
@@ -737,4 +943,5 @@ module.exports = {
   addPortfolioImage,
   uploadStylistAvatar,
   uploadStylistBanner,
+  uploadStylistDocument
 };

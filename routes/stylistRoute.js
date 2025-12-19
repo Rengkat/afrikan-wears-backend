@@ -2,10 +2,10 @@ const express = require("express");
 const router = express.Router();
 const {
   authenticateUser,
-  authorize, // ADD THIS - generic role checker
+  authorize,
   adminAuthorization,
   stylistAuthorization,
-  checkStylistOwnership, // ADD THIS - ownership middleware
+  checkStylistOwnership,
 } = require("../middleware/authentication");
 
 const {
@@ -20,26 +20,26 @@ const {
   uploadStylistBanner,
   addPortfolioImage,
   removePortfolioImage,
-  getMyStylistProfile,
+  getMyStylistProfile,uploadStylistDocument
 } = require("../controllers/stylistController");
 
+// Public routes
 router.route("/").get(getAllStylists);
 router.route("/").post(authenticateUser, adminAuthorization, addStylist);
+// Stylist profile routes
+router
+  .route("/my/profile")
+  .get(authenticateUser, stylistAuthorization, getMyStylistProfile)
+  .patch(authenticateUser, stylistAuthorization, updateStylistProfile);
 
-router.get("/my/profile", authenticateUser, stylistAuthorization, getMyStylistProfile);
 router.route("/:id").get(getSingleStylist);
 
-router.route("/verify/:id").patch(authenticateUser, adminAuthorization, verifyStylistCompany);
+// Admin-only routes
 router.route("/:id").delete(authenticateUser, adminAuthorization, deleteStylist);
+router.route("/:id").patch(authenticateUser, adminAuthorization, updateStylist);
+router.route("/verify/:id").patch(authenticateUser, adminAuthorization, verifyStylistCompany);
 
-router
-  .route("/:id")
-  .patch(authenticateUser, authorize("admin", "stylist"), checkStylistOwnership, updateStylist);
-
-router
-  .route("/:id/profile")
-  .patch(authenticateUser, stylistAuthorization, checkStylistOwnership, updateStylistProfile);
-
+// Upload routes (both admin and stylist with ownership)
 router
   .route("/:id/upload-avatar")
   .post(
@@ -71,4 +71,12 @@ router
     removePortfolioImage
   );
 
+  router
+  .route("/:id/upload-document")
+  .post(
+    authenticateUser,
+    authorize("admin", "stylist"),
+    checkStylistOwnership,
+    uploadStylistDocument
+  );
 module.exports = router;
