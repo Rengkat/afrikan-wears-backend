@@ -6,41 +6,81 @@ const fs = require("fs").promises;
 const CustomError = require("../errors");
 const mongoose = require("mongoose");
 const { writeClient } = require("../utils");
+const { emitNotification } = require("../utils/socket");
+
+// Valid specialty values
+const VALID_SPECIALTIES = ["Traditional", "Corporate", "Casual Wear", "Bridal", "Formal Wear"];
+
+// Helper function to validate specialty array
+const validateSpecialties = (specialties) => {
+  if (!Array.isArray(specialties) || specialties.length === 0) {
+    throw new CustomError.BadRequestError(
+      "Provide at least one specialty from: Traditional, Corporate, Casual Wear, Bridal, Formal Wear"
+    );
+  }
+
+  // Remove duplicates and validate
+  const uniqueSpecialties = [...new Set(specialties)];
+
+  const invalidSpecialties = uniqueSpecialties.filter((spec) => !VALID_SPECIALTIES.includes(spec));
+
+  if (invalidSpecialties.length > 0) {
+    throw new CustomError.BadRequestError(
+      `Invalid specialties: ${invalidSpecialties.join(
+        ", "
+      )}. Must be from: ${VALID_SPECIALTIES.join(", ")}`
+    );
+  }
+
+  // Limit to 3 specialties
+  if (uniqueSpecialties.length > 3) {
+    throw new CustomError.BadRequestError("A stylist can have maximum 3 specialties");
+  }
+
+  return uniqueSpecialties;
+};
+
 const addStylist = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const {
-      company,
+      companyName,
       description,
       owner,
       specialty,
       services,
       phone,
       location,
-      cacCertificateNumber, // ADD THIS
+      cacCertificateNumber,
     } = req.body;
 
-    // Validate required fields - UPDATE VALIDATION
+    // Validate required fields
     if (
-      !company ||
+      !companyName ||
       !owner ||
-      !specialty ||
-      !services?.length ||
       !phone ||
       !location?.state ||
       !location?.address ||
       !cacCertificateNumber
     ) {
       throw new CustomError.BadRequestError(
-        "Provide company, owner ID, specialty, services, phone, CAC certificate number, and full location (state + address)"
+        "Provide company name, owner ID, phone, CAC certificate number, and full location (state + address)"
       );
+    }
+
+    // Validate specialties (now an array)
+    const validatedSpecialties = validateSpecialties(specialty || []);
+
+    // Validate services
+    if (!Array.isArray(services) || services.length === 0) {
+      throw new CustomError.BadRequestError("Provide at least one service");
     }
 
     // Check if stylist exists (case-insensitive)
     const existingStylist = await Stylist.findOne({
-      company: { $regex: new RegExp(`^${company}$`, "i") },
+      companyName: { $regex: new RegExp(`^${companyName}$`, "i") },
     }).session(session);
 
     if (existingStylist) {
@@ -59,10 +99,10 @@ const addStylist = async (req, res, next) => {
     const stylist = await Stylist.create(
       [
         {
-          company,
+          companyName,
           description,
           owner,
-          specialty,
+          specialty: validatedSpecialties, // Now an array
           services,
           phone,
           location,
@@ -90,13 +130,14 @@ const addStylist = async (req, res, next) => {
     // Emit notification for admin verification
     const notificationPayload = {
       type: "stylist_verification_request",
-      message: `New stylist "${stylist[0].company}" requires verification`,
+      message: `New stylist "${stylist[0].companyName}" requires verification`,
       data: {
         stylistId: stylist[0]._id,
-        companyName: stylist[0].company,
+        companyName: stylist[0].companyName,
         cacCertificateNumber: stylist[0].cacCertificateNumber,
         createdAt: new Date(),
       },
+      recipientModel: "User",
     };
     emitNotification(req.io, "newNotification", notificationPayload, "admin_room");
 
@@ -112,6 +153,7 @@ const addStylist = async (req, res, next) => {
     session.endSession();
   }
 };
+
 const verifyStylistCompany = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -144,13 +186,14 @@ const verifyStylistCompany = async (req, res, next) => {
 
       // Notify stylist
       const notificationPayload = {
-        type: "stylist_verified",
-        message: `Your company "${stylist.company}" has been verified! You can now add products.`,
+        type: "stylist_approved",
+        message: `Your company "${stylist.companyName}" has been verified! You can now add products.`,
         data: {
           stylistId: stylist._id,
-          companyName: stylist.company,
+          companyName: stylist.companyName,
           verifiedAt: new Date(),
         },
+        recipientModel: "User",
       };
       emitNotification(req.io, "newNotification", notificationPayload, stylist.owner.toString());
     } else {
@@ -169,13 +212,14 @@ const verifyStylistCompany = async (req, res, next) => {
       // Notify stylist with reason
       const notificationPayload = {
         type: "stylist_rejected",
-        message: `Your company verification for "${stylist.company}" was rejected`,
+        message: `Your company verification for "${stylist.companyName}" was rejected`,
         data: {
           stylistId: stylist._id,
-          companyName: stylist.company,
+          companyName: stylist.companyName,
           rejectionReason: rejectionReason,
           rejectedAt: new Date(),
         },
+        recipientModel: "User",
       };
       emitNotification(req.io, "newNotification", notificationPayload, stylist.owner.toString());
     }
@@ -217,17 +261,32 @@ const getAllStylists = async (req, res, next) => {
     // Build query
     const query = {};
     if (company) {
-      query.company = { $regex: company, $options: "i" };
+      query.companyName = { $regex: company, $options: "i" };
     }
-    if (specialty) {
-      query.specialty = { $regex: specialty, $options: "i" };
+    if (specialty && specialty !== "all") {
+      // Changed from regex to $in for array matching
+      query.specialty = { $in: [specialty] };
     }
     if (isCompanyVerified) {
-      query.isCompanyVerified = "true";
+      query.isCompanyVerified = isCompanyVerified === "true";
     }
+
     // Fetch data
     const [stylists, total] = await Promise.all([
       Stylist.find(query)
+        .populate({
+          path: "owner",
+          select: "firstName surname email phone",
+          transform: (doc) => {
+            if (doc) {
+              doc.name =
+                doc.firstName && doc.surname
+                  ? `${doc.firstName} ${doc.surname}`
+                  : doc.firstName || doc.surname || "Unknown";
+            }
+            return doc;
+          },
+        })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -253,10 +312,11 @@ const getAllStylists = async (req, res, next) => {
     next(error);
   }
 };
+
 const getMyStylistProfile = async (req, res, next) => {
   try {
     const { company, id: userId } = req.user;
-    
+
     if (!company) {
       throw new CustomError.UnauthorizedError("You are not associated with any stylist company");
     }
@@ -319,7 +379,7 @@ const getSingleStylist = async (req, res, next) => {
       });
     }
 
-    const stylist = await Stylist.findById(id).lean();
+    const stylist = await Stylist.findById(id).populate("owner", "firstName surname email phone");
     if (!stylist) {
       throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
     }
@@ -335,7 +395,108 @@ const getSingleStylist = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-}; // ADMIN UPDATE: Full update for any stylist
+};
+
+const suspendStylist = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const { action, suspensionReason } = req.body;
+    const { userId } = req.user;
+
+    if (!["suspend", "activate"].includes(action)) {
+      throw new CustomError.BadRequestError("Invalid action. Use 'suspend' or 'activate'");
+    }
+
+    const stylist = await Stylist.findById(id).session(session);
+    if (!stylist) {
+      throw new CustomError.NotFoundError(`No stylist found with id: ${id}`);
+    }
+
+    if (action === "suspend") {
+      // Validate suspension reason
+      if (!suspensionReason || suspensionReason.trim().length < 10) {
+        throw new CustomError.BadRequestError(
+          "Please provide a valid suspension reason (min 10 chars)"
+        );
+      }
+
+      // Check if already suspended
+      if (stylist.status === "suspended") {
+        throw new CustomError.BadRequestError("Stylist is already suspended");
+      }
+
+      stylist.status = "suspended";
+      stylist.suspensionReason = suspensionReason.trim();
+      stylist.suspendedBy = userId;
+      stylist.suspensionDate = new Date();
+      stylist.canAddProducts = false;
+
+      // Notify stylist
+      const notificationPayload = {
+        type: "stylist_suspended",
+        message: `Your company "${stylist.companyName}" has been suspended`,
+        data: {
+          stylistId: stylist._id,
+          companyName: stylist.companyName,
+          suspensionReason: suspensionReason.trim(),
+          suspendedAt: new Date(),
+        },
+        recipientModel: "User",
+      };
+      emitNotification(req.io, "newNotification", notificationPayload, stylist.owner.toString());
+    } else {
+      // Activate action
+      if (stylist.status !== "suspended") {
+        throw new CustomError.BadRequestError("Stylist is not suspended");
+      }
+
+      stylist.status = "active";
+      stylist.suspensionReason = undefined;
+      stylist.suspendedBy = undefined;
+      stylist.suspensionDate = undefined;
+
+      // Only allow adding products if verified
+      stylist.canAddProducts =
+        stylist.isCompanyVerified && stylist.verificationStatus === "verified";
+
+      // Notify stylist
+      const notificationPayload = {
+        type: "stylist_activated",
+        message: `Your company "${stylist.companyName}" has been reactivated`,
+        data: {
+          stylistId: stylist._id,
+          companyName: stylist.companyName,
+          activatedAt: new Date(),
+        },
+        recipientModel: "User",
+      };
+      emitNotification(req.io, "newNotification", notificationPayload, stylist.owner.toString());
+    }
+
+    await stylist.save({ session });
+    await session.commitTransaction();
+
+    // Clear cache
+    await Promise.all([clearCache(`stylist:${id}`), clearCache("stylist:*")]);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Stylist ${action === "suspend" ? "suspended" : "activated"} successfully`,
+      stylist,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+    console.log(error);
+  } finally {
+    session.endSession();
+  }
+};
+
+// ADMIN UPDATE: Full update for any stylist
 const updateStylist = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -345,7 +506,6 @@ const updateStylist = async (req, res, next) => {
     const updateData = req.body;
     const { role } = req.user;
 
-    // Only admin can use this endpoint
     if (role !== "admin") {
       throw new CustomError.UnauthorizedError(
         "Only admins can update stylists using this endpoint"
@@ -372,32 +532,48 @@ const updateStylist = async (req, res, next) => {
       "rating",
       "reviews",
       "owner",
-      "isVerified",
+      "status",
+      "suspensionReason",
       "verificationStatus",
     ];
 
+    // Don't allow updating verificationStatus through this endpoint
+    if (updateData.verificationStatus !== undefined) {
+      throw new CustomError.BadRequestError(
+        "Use /verify/:id endpoint to update verification status"
+      );
+    }
+
     // Update fields
-    allowedUpdates.forEach((field) => {
-      if (updateData[field] !== undefined) {
-        // Handle nested objects
-        if (
-          (field === "socialMedia" || field === "location") &&
-          typeof updateData[field] === "object"
-        ) {
+    for (const field of allowedUpdates) {
+      if (updateData[field] !== undefined && field !== "verificationStatus") {
+        if (field === "socialMedia" || field === "location") {
+          // Merge objects for socialMedia and location
           stylist[field] = {
             ...stylist[field],
             ...updateData[field],
           };
         } else if (field === "services" && Array.isArray(updateData.services)) {
-          // Special handling for services array
+          // Validate services array
           stylist.services = updateData.services.filter(
             (service) => typeof service === "string" && service.trim().length > 0
           );
+        } else if (field === "specialty" && Array.isArray(updateData.specialty)) {
+          // Validate specialties array
+          stylist.specialty = validateSpecialties(updateData.specialty);
         } else {
           stylist[field] = updateData[field];
         }
       }
-    });
+    }
+
+    // Update canAddProducts based on status and verification
+    if (updateData.status === "suspended" || stylist.status === "suspended") {
+      stylist.canAddProducts = false;
+    } else if (updateData.status === "active" || stylist.status === "active") {
+      stylist.canAddProducts =
+        stylist.isCompanyVerified && stylist.verificationStatus === "verified";
+    }
 
     // Case-insensitive company name conflict check
     if (updateData.companyName && updateData.companyName !== stylist.companyName) {
@@ -443,23 +619,17 @@ const updateStylistProfile = async (req, res, next) => {
     if (role !== "stylist") {
       throw new CustomError.UnauthorizedError("Only stylists can update their profile");
     }
+    const stylist = await Stylist.findOne({ owner: userId }).session(session);
 
-    // Check ownership (already verified by middleware, but double-check)
-    if (company.toString() !== userId.toString()) {
-      throw new CustomError.UnauthorizedError("You can only update your own profile");
-    }
-
-    const stylist = await Stylist.findById(userId).session(session);
     if (!stylist) {
       throw new CustomError.NotFoundError(`No stylist found with id: ${userId}`);
     }
-
-    // Double-check ownership via owner field
-    if (stylist.owner.toString() !== userId.toString()) {
-      throw new CustomError.UnauthorizedError("You are not authorized to update this profile");
+    // Check ownership
+    if (company.toString() !== stylist._id.toString()) {
+      throw new CustomError.UnauthorizedError("You can only update your own profile");
     }
 
-    // Define allowed fields for stylist self-update - ADD CAC AND DOCUMENTS
+    // Define allowed fields for stylist self-update
     const allowedUpdates = [
       "companyName",
       "description",
@@ -471,7 +641,7 @@ const updateStylistProfile = async (req, res, next) => {
       "website",
       "socialMedia",
       "location",
-      "cacCertificateNumber", // ADDED
+      "cacCertificateNumber",
     ];
 
     // Remove admin-only fields if somehow included
@@ -485,7 +655,7 @@ const updateStylistProfile = async (req, res, next) => {
     // Handle documents update if provided
     if (updateData.documents && typeof updateData.documents === "object") {
       const allowedDocuments = ["cacCertificate", "businessRegistration", "taxCertificate"];
-      allowedDocuments.forEach(docType => {
+      allowedDocuments.forEach((docType) => {
         if (updateData.documents[docType] !== undefined) {
           stylist.documents[docType] = updateData.documents[docType];
         }
@@ -493,33 +663,31 @@ const updateStylistProfile = async (req, res, next) => {
     }
 
     // Update allowed fields
-    allowedUpdates.forEach((field) => {
+    for (const field of allowedUpdates) {
       if (updateData[field] !== undefined) {
-        // Handle nested objects
-        if (
-          (field === "socialMedia" || field === "location") &&
-          typeof updateData[field] === "object"
-        ) {
+        if (field === "socialMedia" || field === "location") {
+          // Merge objects
           stylist[field] = {
             ...stylist[field],
             ...updateData[field],
           };
         } else if (field === "services" && Array.isArray(updateData.services)) {
-          // Special handling for services array
+          // Validate services array
           stylist.services = updateData.services.filter(
             (service) => typeof service === "string" && service.trim().length > 0
           );
+        } else if (field === "specialty" && Array.isArray(updateData.specialty)) {
+          // Validate specialties array (stricter limit for self-update)
+          stylist.specialty = validateSpecialties(updateData.specialty);
         } else if (field === "cacCertificateNumber") {
-          // Validate CAC number uniqueness if changed
           if (updateData[field] && updateData[field] !== stylist.cacCertificateNumber) {
-            // Check CAC uniqueness - we'll validate after saving
             stylist.cacCertificateNumber = updateData[field].trim();
           }
         } else {
           stylist[field] = updateData[field];
         }
       }
-    });
+    }
 
     // Case-insensitive company name conflict check
     if (updateData.companyName && updateData.companyName !== stylist.companyName) {
@@ -534,7 +702,10 @@ const updateStylistProfile = async (req, res, next) => {
     }
 
     // CAC number uniqueness check
-    if (updateData.cacCertificateNumber && updateData.cacCertificateNumber !== stylist.cacCertificateNumber) {
+    if (
+      updateData.cacCertificateNumber &&
+      updateData.cacCertificateNumber !== stylist.cacCertificateNumber
+    ) {
       const cacExists = await Stylist.findOne({
         cacCertificateNumber: updateData.cacCertificateNumber.trim(),
         _id: { $ne: userId },
@@ -552,7 +723,7 @@ const updateStylistProfile = async (req, res, next) => {
     await Promise.all([
       clearCache(`stylist:${userId}`),
       clearCache("stylist:*"),
-      clearCache(`user:${userId}`)
+      clearCache(`user:${userId}`),
     ]);
 
     res.status(StatusCodes.OK).json({
@@ -567,14 +738,106 @@ const updateStylistProfile = async (req, res, next) => {
     session.endSession();
   }
 };
+
+// Get products by stylist ID (public endpoint)
+const getProductsByStylist = async (req, res, next) => {
+  try {
+    const { id: stylistId } = req.params;
+    const { page = 1, limit = 12, status = "approved", category, type } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(stylistId)) {
+      throw new CustomError.BadRequestError("Invalid stylist ID");
+    }
+
+    // Verify stylist exists and is active/verified
+    const stylist = await Stylist.findById(stylistId);
+    if (!stylist) {
+      throw new CustomError.NotFoundError("Stylist not found");
+    }
+
+    // Build query
+    const query = {
+      stylist: stylistId,
+      status: status || "approved",
+    };
+
+    // Additional filters
+    if (category) query.category = category;
+    if (type) query.type = type;
+
+    // Cache key
+    const cacheKey = `products:stylist:${stylistId}:${page}:${limit}:${status}:${category || ""}:${
+      type || ""
+    }`;
+
+    // Try cache first
+    const cachedData = await getFromCache(cacheKey);
+    if (cachedData) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        ...cachedData,
+      });
+    }
+
+    // Pagination
+    const skip = (page - 1) * limit;
+
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .select("name price mainImage rating category type stock status featured")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(query),
+    ]);
+
+    // Add stylist info to each product
+    const productsWithStylistInfo = products.map((product) => ({
+      ...product,
+      stylistInfo: {
+        companyName: stylist.companyName,
+        isVerified: stylist.isCompanyVerified,
+        avatar: stylist.avatar,
+      },
+    }));
+
+    const responseData = {
+      count: products.length,
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / limit),
+      products: productsWithStylistInfo,
+      stylistInfo: {
+        companyName: stylist.companyName,
+        totalProducts: total,
+        isVerified: stylist.isCompanyVerified,
+      },
+    };
+
+    // Cache for 30 minutes
+    await setInCache(cacheKey, responseData, 1800);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      fromCache: false,
+      ...responseData,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 const deleteStylist = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { id } = req.params;
+    console.log(id);
 
     // Check if Stylist has products
+    const Product = require("../models/productModel"); // Add this import at top
     const productsCount = await Product.countDocuments({ stylist: id }).session(session);
     if (productsCount > 0) {
       throw new CustomError.BadRequestError("Cannot delete stylist with associated products");
@@ -606,7 +869,8 @@ const deleteStylist = async (req, res, next) => {
     session.endSession();
   }
 };
-/// images
+
+// Images and documents controllers (unchanged, they don't touch specialty)
 const uploadStylistAvatar = async (req, res, next) => {
   let tempFilePath = null;
 
@@ -732,6 +996,7 @@ const uploadStylistBanner = async (req, res, next) => {
     }
   }
 };
+
 const addPortfolioImage = async (req, res, next) => {
   let tempFilePath = null;
 
@@ -797,7 +1062,7 @@ const addPortfolioImage = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json({
       success: true,
-      portfolioItem: addedItem, // Return the added item with _id
+      portfolioItem: addedItem,
       documentId: doc._id,
       message: "Portfolio image added successfully",
     });
@@ -813,6 +1078,7 @@ const addPortfolioImage = async (req, res, next) => {
     }
   }
 };
+
 const uploadStylistDocument = async (req, res, next) => {
   let tempFilePath = null;
 
@@ -829,8 +1095,13 @@ const uploadStylistDocument = async (req, res, next) => {
       throw new CustomError.BadRequestError("Document file is required");
     }
 
-    if (!documentType || !["cacCertificate", "businessRegistration", "taxCertificate"].includes(documentType)) {
-      throw new CustomError.BadRequestError("Valid document type is required (cacCertificate, businessRegistration, or taxCertificate)");
+    if (
+      !documentType ||
+      !["cacCertificate", "businessRegistration", "taxCertificate"].includes(documentType)
+    ) {
+      throw new CustomError.BadRequestError(
+        "Valid document type is required (cacCertificate, businessRegistration, or taxCertificate)"
+      );
     }
 
     const documentFile = req.files.document;
@@ -873,16 +1144,13 @@ const uploadStylistDocument = async (req, res, next) => {
     );
 
     // Clear cache
-    await Promise.all([
-      clearCache(`stylist:${id}`),
-      clearCache("stylist:*")
-    ]);
+    await Promise.all([clearCache(`stylist:${id}`), clearCache("stylist:*")]);
 
     res.status(StatusCodes.OK).json({
       success: true,
       documentUrl,
       documentType,
-      message: `${documentType.replace(/([A-Z])/g, ' $1')} uploaded successfully`,
+      message: `${documentType.replace(/([A-Z])/g, " $1")} uploaded successfully`,
     });
   } catch (error) {
     next(error);
@@ -896,6 +1164,7 @@ const uploadStylistDocument = async (req, res, next) => {
     }
   }
 };
+
 const removePortfolioImage = async (req, res, next) => {
   try {
     const { id, imageId } = req.params;
@@ -943,5 +1212,7 @@ module.exports = {
   addPortfolioImage,
   uploadStylistAvatar,
   uploadStylistBanner,
-  uploadStylistDocument
+  uploadStylistDocument,
+  suspendStylist,
+  getProductsByStylist,
 };

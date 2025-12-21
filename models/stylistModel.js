@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const validator = require("validator");
 
 const StylistSchema = new mongoose.Schema(
   {
@@ -15,8 +16,19 @@ const StylistSchema = new mongoose.Schema(
       maxlength: [500, "Description cannot exceed 500 characters"],
     },
     specialty: {
-      type: String,
-      trim: true,
+      type: [
+        {
+          type: String,
+          enum: ["Traditional", "Corporate", "Casual Wear", "Bridal", "Formal Wear"],
+        },
+      ],
+      default: [],
+      validate: {
+        validator: function (arr) {
+          return arr.length <= 3;
+        },
+        message: "A stylist can select up to 3 specialties",
+      },
     },
     experience: {
       type: String,
@@ -75,7 +87,7 @@ const StylistSchema = new mongoose.Schema(
     },
     portfolio: [
       {
-        image: { type: String, required: true }, 
+        image: { type: String, required: true },
         category: { type: String, required: true },
       },
     ],
@@ -117,6 +129,22 @@ const StylistSchema = new mongoose.Schema(
     rejectionReason: {
       type: String,
       trim: true,
+    },
+    status: {
+      type: String,
+      enum: ["active", "suspended", "inactive"],
+      default: "active",
+    },
+    suspensionReason: {
+      type: String,
+      trim: true,
+    },
+    suspendedBy: {
+      type: mongoose.Types.ObjectId,
+      ref: "User",
+    },
+    suspensionDate: {
+      type: Date,
     },
     documents: {
       cacCertificate: { type: String },

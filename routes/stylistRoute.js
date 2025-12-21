@@ -20,7 +20,10 @@ const {
   uploadStylistBanner,
   addPortfolioImage,
   removePortfolioImage,
-  getMyStylistProfile,uploadStylistDocument
+  getMyStylistProfile,
+  uploadStylistDocument,
+  suspendStylist,
+  getProductsByStylist,
 } = require("../controllers/stylistController");
 
 // Public routes
@@ -34,12 +37,14 @@ router
 
 router.route("/:id").get(getSingleStylist);
 
-// Admin-only routes
 router.route("/:id").delete(authenticateUser, adminAuthorization, deleteStylist);
 router.route("/:id").patch(authenticateUser, adminAuthorization, updateStylist);
+router.get("/products/:id", getProductsByStylist);
 router.route("/verify/:id").patch(authenticateUser, adminAuthorization, verifyStylistCompany);
 
-// Upload routes (both admin and stylist with ownership)
+// In your stylist routes
+router.route("/suspend/:id").patch(authenticateUser, adminAuthorization, suspendStylist);
+
 router
   .route("/:id/upload-avatar")
   .post(
@@ -71,7 +76,7 @@ router
     removePortfolioImage
   );
 
-  router
+router
   .route("/:id/upload-document")
   .post(
     authenticateUser,

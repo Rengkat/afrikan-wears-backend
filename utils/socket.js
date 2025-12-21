@@ -45,9 +45,11 @@ const emitNotification = async (io, eventName, payload, target) => {
       console.log(`Admin notification stored for ${notifications.length} admins`);
       return;
     }
+    const recipientModel = payload.recipientModel || "User";
     // Persist notification to database
     const notification = await Notification.create({
       recipient: target,
+      recipientModel: recipientModel,
       type: payload.type,
       message: payload.message,
       data: payload.data,

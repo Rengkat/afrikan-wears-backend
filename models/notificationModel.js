@@ -29,6 +29,13 @@ const notificationSchema = new mongoose.Schema(
         "credit_wallet",
         "debit_wallet",
         "system_alert",
+        "stylist_verification_request",
+        "stylist_approved",
+        "stylist_rejected",
+        "stylist_suspended",
+        "stylist_activated",
+        "order_cancelled",
+        "order_delivered",
       ],
     },
     message: {

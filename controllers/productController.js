@@ -239,7 +239,7 @@ const getAllProducts = async (req, res, next) => {
   try {
     const { role, company, userId } = req.user;
     const { stylist, page = 1, name, limit = 10, category, type, featured, status } = req.query;
-
+    console.log(role);
     // Create a unique cache key based on all parameters
     const cacheKey = `products:${role}:${userId}:${stylist || "all"}:${page}:${limit}:${
       name || ""
@@ -261,10 +261,7 @@ const getAllProducts = async (req, res, next) => {
     if (role === "user") {
       query.status = "approved";
     } else if (role === "stylist") {
-      query.$or = [
-        { status: "approved" },
-        { stylist: company, createdBy: "stylist" }, // Their own products
-      ];
+      query.$or = [{ status: "approved" }, { stylist: company, createdBy: "stylist" }];
     }
     // Admins can see all products by default
 
@@ -324,6 +321,7 @@ const getAllProducts = async (req, res, next) => {
     next(error);
   }
 };
+
 const getMyProducts = async (req, res, next) => {
   try {
     const { role, company, userId } = req.user;
