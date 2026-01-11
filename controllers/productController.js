@@ -10,7 +10,6 @@ const mongoose = require("mongoose");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
 const Stylist = require("../models/stylistModel");
 const { emitNotification } = require("../utils/socket");
-
 const addProduct = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -29,19 +28,7 @@ const addProduct = async (req, res, next) => {
       attributes,
       type,
     } = req.body;
-    console.log(
-      name,
-      price,
-      mainImage,
-      subImages,
-      category,
-      description,
-      stock,
-      rating,
-      featured,
-      attributes,
-      type
-    );
+
     // Get user info from auth middleware
     const { role, company, userId } = req.user;
 
@@ -109,8 +96,6 @@ const addProduct = async (req, res, next) => {
 
     // Notification for stylist-created products
     if (role === "stylist") {
-      const stylistCompany = await Stylist.findById(company).select("name").lean();
-
       const notificationPayload = {
         type: "product_approval_request",
         message: `New product "${product[0].name}" requires approval`,
@@ -118,12 +103,18 @@ const addProduct = async (req, res, next) => {
           productId: product[0]._id,
           productName: product[0].name,
           stylistId: stylistId,
-          stylistName: stylistCompany?.name || "Stylist",
+          stylistName: stylistCompany?.companyName || "Stylist",
           createdAt: new Date(),
+          category: product[0].category,
+          price: product[0].price,
         },
+        recipientModel: "User",
       };
+
+      // Send to admin room
       emitNotification(req.io, "newNotification", notificationPayload, "admin_room");
     }
+
     res.status(StatusCodes.CREATED).json({
       success: true,
       product: product[0],
@@ -156,32 +147,42 @@ const verifyProduct = async (req, res, next) => {
       throw new CustomError.NotFoundError("Product not found");
     }
 
-    // Check if product needs verification
-    if (product.createdBy !== "stylist" || product.status !== "pending") {
-      throw new CustomError.BadRequestError("This product does not require verification");
+    // Check if product needs verification - allow admin to approve/reject pending products
+    if (product.status !== "pending") {
+      throw new CustomError.BadRequestError("Only pending products can be verified");
     }
+
+    // Populate stylist to get owner info
+    await product.populate("stylist", "owner companyName");
 
     if (action === "approve") {
       product.isAdminApproved = true;
-      product.status = "published";
+      product.status = "approved";
       product.approvedBy = userId;
       product.rejectionReason = undefined;
-      // Notify stylist
-      if (product.stylist) {
+
+      // Notify stylist -
+      if (product.stylist && product.stylist.owner) {
         const notificationPayload = {
           type: "product_approved",
-          message: `Your product "${product.name}" was approved`,
+          message: `Your product "${product.name}" has been approved and is now live!`,
           data: {
             productId: product._id,
             productName: product.name,
+            productImage: product.mainImage,
             approvedAt: new Date(),
+            price: product.price,
+            category: product.category,
           },
+          recipientModel: "User",
         };
+
+        // Send to stylist owner's room
         emitNotification(
           req.io,
           "newNotification",
           notificationPayload,
-          product.stylist.toString()
+          product.stylist.owner.toString()
         );
       }
     } else {
@@ -194,25 +195,30 @@ const verifyProduct = async (req, res, next) => {
 
       product.isAdminApproved = false;
       product.status = "rejected";
-      product.rejectionReason = reason;
+      product.rejectionReason = reason.trim();
       product.approvedBy = userId;
+
       // Notify stylist with reason
-      if (product.stylist) {
+      if (product.stylist && product.stylist.owner) {
         const notificationPayload = {
           type: "product_rejected",
           message: `Your product "${product.name}" was rejected`,
           data: {
             productId: product._id,
             productName: product.name,
-            rejectionReason: reason,
+            rejectionReason: reason.trim(),
             rejectedAt: new Date(),
+            suggestions: "Please review the rejection reason and submit an improved version.",
           },
+          recipientModel: "User",
         };
+
+        // Send to stylist owner's room
         emitNotification(
           req.io,
           "newNotification",
           notificationPayload,
-          product.stylist.toString()
+          product.stylist.owner.toString()
         );
       }
     }
@@ -220,8 +226,14 @@ const verifyProduct = async (req, res, next) => {
     await product.save({ session });
     await session.commitTransaction();
 
-    // Clear cache
-    await clearCache("products:*");
+    // Clear all product-related cache
+    await Promise.all([
+      clearCache("products:*"),
+      clearCache("admin-products:*"),
+      clearCache(`product:${productId}`),
+      clearCache(`myproducts:*`),
+      clearCache(`stylist:${product.stylist._id}`),
+    ]);
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -292,9 +304,9 @@ const getAllProducts = async (req, res, next) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
-        .select("name price mainImage rating category featured status createdBy")
-        .populate("stylist", "name")
-        .populate("approvedBy", "name")
+        .select("name price mainImage rating category featured status createdBy createdAt sku type")
+        .populate("stylist", "companyName avatar rating specialty")
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -321,7 +333,75 @@ const getAllProducts = async (req, res, next) => {
     next(error);
   }
 };
+const getApprovedProducts = async (req, res, next) => {
+  try {
+    const { stylist, page = 1, name, limit = 10, category, type, featured } = req.query;
 
+    // Create a unique cache key based on all parameters
+    const cacheKey = `approved-products:${stylist || "all"}:${page}:${limit}:${name || ""}:${
+      category || ""
+    }:${type || ""}:${featured || ""}`;
+
+    // get data from cache first
+    const cachedData = await getFromCache(cacheKey);
+    if (cachedData) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        fromCache: true,
+        ...cachedData,
+      });
+    }
+
+    const query = { status: "approved" }; // Only approved products
+
+    // Additional filters
+    if (stylist) {
+      if (!mongoose.Types.ObjectId.isValid(stylist)) {
+        throw new CustomError.BadRequestError("Invalid stylist ID");
+      }
+      query.stylist = stylist;
+    }
+    if (name) query.name = { $regex: name, $options: "i" };
+    if (category) query.category = category;
+    if (type) query.type = type;
+    if (featured) query.featured = featured === "true";
+
+    // Pagination
+    const skip = (page - 1) * limit;
+
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .select(
+          "name price mainImage rating category featured status createdAt description stock sku attributes type materials careInstructions deliveryInfo sizes colors"
+        )
+        .populate("stylist", "companyName avatar rating specialty location")
+        .populate("approvedBy", "firstName surname")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(query),
+    ]);
+    const responseData = {
+      count: products.length,
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / limit),
+      products,
+    };
+
+    // Cache the response for 1 hour (3600 seconds)
+    await setInCache(cacheKey, responseData, 3600);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      fromCache: false,
+      ...responseData,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 const getMyProducts = async (req, res, next) => {
   try {
     const { role, company, userId } = req.user;
@@ -368,9 +448,9 @@ const getMyProducts = async (req, res, next) => {
         .select(
           "name price mainImage rating category featured status stock createdAt rejectionReason"
         )
-        .populate("stylist", "name")
-        .populate("approvedBy", "name")
-        .sort({ createdAt: -1 }) // Newest first
+        .populate("stylist", "companyName avatar")
+        .populate("approvedBy", "firstName surname email")
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -400,7 +480,7 @@ const getMyProducts = async (req, res, next) => {
 const getDetailProduct = async (req, res, next) => {
   try {
     const { productId: id } = req.params;
-
+    // console.log(id);
     if (!mongoose.Types.ObjectId.isValid(id)) {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
@@ -418,8 +498,12 @@ const getDetailProduct = async (req, res, next) => {
     }
 
     const product = await Product.findById(id)
-      .populate("stylist", "name location")
-      .populate("reviews.user", "name avatar");
+      .populate(
+        "stylist",
+        "companyName description rating avatar specialty location socialMedia portfolio isCompanyVerified"
+      )
+      .populate("reviews.user", "name avatar email")
+      .populate("approvedBy", "firstName surname email");
 
     if (!product) {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
@@ -577,7 +661,9 @@ const deleteProduct = async (req, res, next) => {
       throw new CustomError.BadRequestError("Invalid product ID");
     }
 
-    const product = await Product.findById(id).session(session);
+    const product = await Product.findById(id)
+      .populate("stylist", "owner companyName")
+      .session(session);
     if (!product) {
       throw new CustomError.NotFoundError(`Product with ID ${id} not found`);
     }
@@ -628,16 +714,15 @@ const deleteProduct = async (req, res, next) => {
     transactionCommitted = true;
     console.log("Database transaction committed successfully");
 
-    // ✅ THEN CLEAR CACHE WITH FIXED REDIS FUNCTIONS
+    // ✅ THEN CLEAR CACHE
     const cachePatterns = [
       `product:${id}`,
       "products:*",
-      `myproducts:${company}:*`,
-      `myproducts:${company}:1:*`,
       `myproducts:*`,
+      `stylist:${product.stylist._id}`,
     ];
 
-    console.log(`[CACHE] Starting cache clear for company ${company}`);
+    console.log(`[CACHE] Starting cache clear for product ${id}`);
 
     let totalCleared = 0;
     const cacheResults = {};
@@ -646,35 +731,19 @@ const deleteProduct = async (req, res, next) => {
       try {
         const cleared = await clearCache(pattern);
         cacheResults[pattern] = cleared;
-
-        if (cleared > 0) {
-          totalCleared += cleared;
-          console.log(`[CACHE] ✅ Cleared ${cleared} keys for "${pattern}"`);
-        } else if (cleared === 0) {
-          console.log(`[CACHE] ℹ️  No keys found for "${pattern}"`);
-        } else if (cleared === -1) {
-          console.log(`[CACHE] ❌ Error clearing "${pattern}"`);
-        }
       } catch (error) {
         console.error(`[CACHE] Failed to clear "${pattern}":`, error.message);
         cacheResults[pattern] = "error";
       }
     }
 
-    // Optional: Force immediate cache check
-    if (totalCleared === 0) {
-      console.log(`[CACHE WARNING] No cache keys were cleared!`);
-      console.log(`[CACHE DEBUG] Testing cache manually...`);
-
-      // Test if we can access Redis
-      const testKey = `test:${Date.now()}`;
-      const testSet = await setInCache(testKey, { test: "data" }, 10);
-      const testGet = await getFromCache(testKey);
-      console.log(`[CACHE DEBUG] Test set: ${testSet}, Test get:`, testGet);
-    }
-
-    // Notify if product was deleted by admin
-    if (role === "admin" && product.createdBy === "stylist") {
+    // Notify stylist if product was deleted by admin
+    if (
+      role === "admin" &&
+      product.createdBy === "stylist" &&
+      product.stylist &&
+      product.stylist.owner
+    ) {
       const notificationPayload = {
         type: "product_deleted",
         message: `Your product "${product.name}" was deleted by admin`,
@@ -682,9 +751,17 @@ const deleteProduct = async (req, res, next) => {
           productId: product._id,
           productName: product.name,
           deletedAt: new Date(),
+          reason: "Removed by administrator",
         },
+        recipientModel: "User",
       };
-      emitNotification(req.io, "newNotification", notificationPayload, product.stylist.toString());
+
+      emitNotification(
+        req.io,
+        "newNotification",
+        notificationPayload,
+        product.stylist.owner.toString()
+      );
     }
 
     res.status(StatusCodes.OK).json({
@@ -693,13 +770,12 @@ const deleteProduct = async (req, res, next) => {
       deletedImagesCount: imagesToDelete.length,
       cacheCleared: totalCleared > 0,
       totalCacheKeysCleared: totalCleared,
-      cacheResults, // Include detailed results
+      cacheResults,
     });
   } catch (error) {
     // Only abort if transaction wasn't committed
     if (session.inTransaction() && !transactionCommitted) {
       await session.abortTransaction();
-      console.log("Transaction aborted due to error");
     }
     next(error);
   } finally {
@@ -946,4 +1022,5 @@ module.exports = {
   addReview,
   updateReview,
   verifyProduct,
+  getApprovedProducts,
 };

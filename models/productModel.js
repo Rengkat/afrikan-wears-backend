@@ -140,8 +140,8 @@ const ProductSchema = new mongoose.Schema(
     // Status
     status: {
       type: String,
-      enum: ["draft", "pending", "approved", "rejected", "published", "archived"],
-      default: "draft",
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
     },
   },
   {

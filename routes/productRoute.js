@@ -16,11 +16,12 @@ const {
   verifyProduct,
   getMyProducts,
   deleteProductImage,
+  getApprovedProducts,
 } = require("../controllers/productController");
 const router = express.Router();
 
 // Public routes
-router.route("/").get(getAllProducts);
+router.route("/").get(getApprovedProducts);
 
 // Protected routes
 router
@@ -30,6 +31,7 @@ router
 router
   .route("/my-products")
   .get(authenticateUser, adminAndStylistAuthorization("stylist", "admin"), getMyProducts);
+router.route("/all-products-admin").get(authenticateUser, adminAuthorization, getAllProducts);
 
 router
   .route("/upload-product-image")

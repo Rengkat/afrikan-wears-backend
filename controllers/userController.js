@@ -8,7 +8,7 @@ const fs = require("fs").promises;
 const getAllUsers = async (req, res, next) => {
   try {
     const { name, page = 1, limit = 10 } = req.query;
-    const cacheKey = `users:${name || ""}:page:${page}:limit:${limit}`;
+    const cacheKey = `regular-users:${name || ""}:page:${page}:limit:${limit}`;
 
     // Check cache first
     const cachedData = await getFromCache(cacheKey);
@@ -20,20 +20,22 @@ const getAllUsers = async (req, res, next) => {
       });
     }
 
-    // Build query
-    const query = {};
+    // Build query - only "user" role
+    const query = { role: "user" };
+
     if (name) {
       query.$or = [
         { firstName: { $regex: name, $options: "i" } },
         { surname: { $regex: name, $options: "i" } },
+        { email: { $regex: name, $options: "i" } },
       ];
     }
-    // if(user.role)
 
     // Execute queries in parallel
     const [users, total] = await Promise.all([
       User.find(query)
         .select("-password -verificationToken -googleId")
+        .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(Number(limit))
         .lean(),
@@ -65,10 +67,12 @@ const getAllUsers = async (req, res, next) => {
 const getDetailUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const cacheKey = `users:${id}`;
-    const cachedData = getFromCache(cacheKey);
+    const cacheKey = `user:${id}`;
 
+    // Check cache first
+    const cachedData = await getFromCache(cacheKey);
     if (cachedData) {
+      // console.log("Returning from cache:", cacheKey);
       return res.status(StatusCodes.OK).json({
         fromCache: true,
         success: true,
@@ -82,17 +86,30 @@ const getDetailUser = async (req, res, next) => {
 
     const user = await User.findById(id)
       .select("-password -verificationToken -googleId -verificationTokenExpirationDate")
-      .populate("addresses")
+      .populate({
+        path: "addresses",
+        select: "-user -__v",
+      })
       .lean();
 
     if (!user) {
       throw new CustomError.NotFoundError(`User with ID ${id} not found`);
     }
 
-    await setInCache(cacheKey, user);
+    // Add virtual fields manually if needed
+    const userWithVirtuals = {
+      ...user,
+      // Add any computed fields here
+      fullName: `${user.firstName} ${user.surname}`,
+      isActive: user.isVerified,
+    };
+
+    // Cache the result for 5 minutes
+    await setInCache(cacheKey, userWithVirtuals);
+
     res.status(StatusCodes.OK).json({
       success: true,
-      user,
+      user: userWithVirtuals,
       fromCache: false,
     });
   } catch (error) {
