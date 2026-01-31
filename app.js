@@ -16,6 +16,7 @@ const rateLimit = require("express-rate-limit");
 const passport = require("passport");
 const session = require("express-session");
 const User = require("./models/userModel");
+const Message = require("./models/messageModel");
 const app = express();
 const server = http.createServer(app);
 
@@ -39,6 +40,8 @@ const webhookRoute = require("./routes/webhooks");
 const notFoundMiddleware = require("./middleware/not-found");
 const errorHandlerMiddleware = require("./middleware/error-handler");
 
+// Socket handlers
+const setupSocketHandlers = require("./utils/setupSocketHandlers");
 // Rate limiters
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -81,7 +84,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 // Socket.io initialization
@@ -97,45 +100,9 @@ app.use((req, res, next) => {
   req.io = io;
   next();
 });
-// Socket.io events
-io.on("connection", (socket) => {
-  console.log("A user connected:", socket.id);
-
-  // Client should send userId upon connection or after auth, e.g., in handshake query
-  const userId = socket.handshake.query.userId;
-
-  if (userId) {
-    socket.join(userId.toString());
-    console.log(`User ${socket.id} with ID ${userId} joined personal room: ${userId}`);
-
-    // Join role-based rooms (e.g., for admins)
-    // This requires fetching user details or having role in JWT decoded earlier
-    (async () => {
-      try {
-        const user = await User.findById(userId).select("role").lean(); // Efficiently get role
-        if (user && user.role === "admin") {
-          socket.join("admin_room");
-          console.log(`Admin user ${userId} (socket: ${socket.id}) joined admin_room`);
-        }
-        //  also have 'stylist_room' if needed for general stylist broadcasts
-      } catch (error) {
-        console.error(`Error fetching user role for ${userId}:`, error);
-      }
-    })();
-  } else {
-    console.warn(`Socket ${socket.id} connected without userId in handshake query.`);
-  }
-
-  socket.on("error", (error) => {
-    console.error("Socket error:", error);
-  });
-
-  socket.on("disconnect", () => {
-    console.log("A user disconnected:", socket.id);
-    // Socket.IO automatically removes disconnected sockets from rooms.
-  });
-});
-
+// Setup socket handlers
+// Session configuration
+setupSocketHandlers(io);
 // Session configuration
 // app.use(
 //   session({

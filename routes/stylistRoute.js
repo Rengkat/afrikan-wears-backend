@@ -26,7 +26,6 @@ const {
   getProductsByStylist,
 } = require("../controllers/stylistController");
 
-// Public routes
 router.route("/").get(getAllStylists);
 router.route("/").post(authenticateUser, adminAuthorization, addStylist);
 // Stylist profile routes
@@ -35,10 +34,11 @@ router
   .get(authenticateUser, stylistAuthorization, getMyStylistProfile)
   .patch(authenticateUser, stylistAuthorization, updateStylistProfile);
 
-router.route("/:id").get(getSingleStylist);
-
-router.route("/:id").delete(authenticateUser, adminAuthorization, deleteStylist);
-router.route("/:id").patch(authenticateUser, adminAuthorization, updateStylist);
+router
+  .route("/:id")
+  .get(getSingleStylist)
+  .delete(authenticateUser, adminAuthorization, deleteStylist)
+  .patch(authenticateUser, adminAuthorization, updateStylist);
 router.get("/products/:id", getProductsByStylist);
 router.route("/verify/:id").patch(authenticateUser, adminAuthorization, verifyStylistCompany);
 
@@ -51,7 +51,7 @@ router
     authenticateUser,
     authorize("admin", "stylist"),
     checkStylistOwnership,
-    uploadStylistAvatar
+    uploadStylistAvatar,
   );
 
 router
@@ -60,7 +60,7 @@ router
     authenticateUser,
     authorize("admin", "stylist"),
     checkStylistOwnership,
-    uploadStylistBanner
+    uploadStylistBanner,
   );
 
 router
@@ -73,7 +73,7 @@ router
     authenticateUser,
     authorize("admin", "stylist"),
     checkStylistOwnership,
-    removePortfolioImage
+    removePortfolioImage,
   );
 
 router
@@ -82,6 +82,6 @@ router
     authenticateUser,
     authorize("admin", "stylist"),
     checkStylistOwnership,
-    uploadStylistDocument
+    uploadStylistDocument,
   );
 module.exports = router;

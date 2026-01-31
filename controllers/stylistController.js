@@ -3,6 +3,7 @@ const User = require("../models/userModel");
 const { StatusCodes } = require("http-status-codes");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
 const fs = require("fs").promises;
+const Product = require("../models/productModel");
 const CustomError = require("../errors");
 const mongoose = require("mongoose");
 const { writeClient } = require("../utils");
@@ -15,7 +16,7 @@ const VALID_SPECIALTIES = ["Traditional", "Corporate", "Casual Wear", "Bridal", 
 const validateSpecialties = (specialties) => {
   if (!Array.isArray(specialties) || specialties.length === 0) {
     throw new CustomError.BadRequestError(
-      "Provide at least one specialty from: Traditional, Corporate, Casual Wear, Bridal, Formal Wear"
+      "Provide at least one specialty from: Traditional, Corporate, Casual Wear, Bridal, Formal Wear",
     );
   }
 
@@ -27,8 +28,8 @@ const validateSpecialties = (specialties) => {
   if (invalidSpecialties.length > 0) {
     throw new CustomError.BadRequestError(
       `Invalid specialties: ${invalidSpecialties.join(
-        ", "
-      )}. Must be from: ${VALID_SPECIALTIES.join(", ")}`
+        ", ",
+      )}. Must be from: ${VALID_SPECIALTIES.join(", ")}`,
     );
   }
 
@@ -66,7 +67,7 @@ const addStylist = async (req, res, next) => {
       !cacCertificateNumber
     ) {
       throw new CustomError.BadRequestError(
-        "Provide company name, owner ID, phone, CAC certificate number, and full location (state + address)"
+        "Provide company name, owner ID, phone, CAC certificate number, and full location (state + address)",
       );
     }
 
@@ -111,7 +112,7 @@ const addStylist = async (req, res, next) => {
           isCompanyVerified: false,
         },
       ],
-      { session }
+      { session },
     );
 
     // Update user role
@@ -200,7 +201,7 @@ const verifyStylistCompany = async (req, res, next) => {
       // Reject action
       if (!rejectionReason || rejectionReason.trim().length < 10) {
         throw new CustomError.BadRequestError(
-          "Please provide a valid rejection reason (min 10 chars)"
+          "Please provide a valid rejection reason (min 10 chars)",
         );
       }
 
@@ -419,7 +420,7 @@ const suspendStylist = async (req, res, next) => {
       // Validate suspension reason
       if (!suspensionReason || suspensionReason.trim().length < 10) {
         throw new CustomError.BadRequestError(
-          "Please provide a valid suspension reason (min 10 chars)"
+          "Please provide a valid suspension reason (min 10 chars)",
         );
       }
 
@@ -508,7 +509,7 @@ const updateStylist = async (req, res, next) => {
 
     if (role !== "admin") {
       throw new CustomError.UnauthorizedError(
-        "Only admins can update stylists using this endpoint"
+        "Only admins can update stylists using this endpoint",
       );
     }
 
@@ -540,7 +541,7 @@ const updateStylist = async (req, res, next) => {
     // Don't allow updating verificationStatus through this endpoint
     if (updateData.verificationStatus !== undefined) {
       throw new CustomError.BadRequestError(
-        "Use /verify/:id endpoint to update verification status"
+        "Use /verify/:id endpoint to update verification status",
       );
     }
 
@@ -556,7 +557,7 @@ const updateStylist = async (req, res, next) => {
         } else if (field === "services" && Array.isArray(updateData.services)) {
           // Validate services array
           stylist.services = updateData.services.filter(
-            (service) => typeof service === "string" && service.trim().length > 0
+            (service) => typeof service === "string" && service.trim().length > 0,
           );
         } else if (field === "specialty" && Array.isArray(updateData.specialty)) {
           // Validate specialties array
@@ -674,7 +675,7 @@ const updateStylistProfile = async (req, res, next) => {
         } else if (field === "services" && Array.isArray(updateData.services)) {
           // Validate services array
           stylist.services = updateData.services.filter(
-            (service) => typeof service === "string" && service.trim().length > 0
+            (service) => typeof service === "string" && service.trim().length > 0,
           );
         } else if (field === "specialty" && Array.isArray(updateData.specialty)) {
           // Validate specialties array (stricter limit for self-update)
@@ -744,6 +745,8 @@ const getProductsByStylist = async (req, res, next) => {
   try {
     const { id: stylistId } = req.params;
     const { page = 1, limit = 12, status = "approved", category, type } = req.query;
+    console.log("Stylist ID:", stylistId);
+    console.log("Query Parameters:", req.query);
 
     if (!mongoose.Types.ObjectId.isValid(stylistId)) {
       throw new CustomError.BadRequestError("Invalid stylist ID");
@@ -1052,7 +1055,7 @@ const addPortfolioImage = async (req, res, next) => {
     const stylist = await Stylist.findByIdAndUpdate(
       id,
       { $push: { portfolio: portfolioItem } },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     // Get the newly added portfolio item with its _id
@@ -1100,7 +1103,7 @@ const uploadStylistDocument = async (req, res, next) => {
       !["cacCertificate", "businessRegistration", "taxCertificate"].includes(documentType)
     ) {
       throw new CustomError.BadRequestError(
-        "Valid document type is required (cacCertificate, businessRegistration, or taxCertificate)"
+        "Valid document type is required (cacCertificate, businessRegistration, or taxCertificate)",
       );
     }
 
@@ -1140,7 +1143,7 @@ const uploadStylistDocument = async (req, res, next) => {
     const stylist = await Stylist.findByIdAndUpdate(
       id,
       { [updateField]: documentUrl },
-      { new: true }
+      { new: true },
     );
 
     // Clear cache
