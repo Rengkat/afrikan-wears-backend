@@ -6,6 +6,7 @@ const {
   updateCart,
   getAllCartProducts,
   clearCart,
+  moveToWishlist,
 } = require("../controllers/cartController");
 const { authenticateUser, authorize } = require("../middleware/authentication");
 
@@ -14,6 +15,8 @@ router
   .post(authenticateUser, authorize("user"), addToCart)
   .get(authenticateUser, authorize("user"), getAllCartProducts);
 router.post("/clear-cart", authenticateUser, clearCart);
+router.route("/move-to-wishlist").post(authenticateUser, authorize("user"), moveToWishlist);
+
 router
   .route("/:id")
   .delete(authenticateUser, authorize("user"), removeFromCart)

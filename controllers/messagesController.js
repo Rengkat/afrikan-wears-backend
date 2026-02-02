@@ -598,4 +598,5 @@ module.exports = {
   uploadMessageImage,
   getUnreadMessagesCount,
   getUnreadCountByChat,
+  markMessagesAsRead,
 };

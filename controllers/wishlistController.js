@@ -41,7 +41,7 @@ const addToWishlist = async (req, res, next) => {
             items: [{ product: productId }],
           },
         ],
-        { session }
+        { session },
       );
     } else {
       // Check if product already exists in wishlist
@@ -219,7 +219,7 @@ const moveToCart = async (req, res, next) => {
             items: [{ product: productId, quantity: 1, price: product.price }],
           },
         ],
-        { session }
+        { session },
       );
     } else {
       const existingItem = cart.items.find((item) => item.product.toString() === productId);

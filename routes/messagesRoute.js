@@ -10,6 +10,7 @@ const {
   startChat,
   getUnreadMessagesCount,
   getUnreadCountByChat,
+  markMessagesAsRead,
 } = require("../controllers/messagesController");
 const rateLimit = require("express-rate-limit");
 
@@ -34,6 +35,7 @@ router.post("/start-chat", chatLimiter, authenticateUser, startChat);
 router.post("/upload-image", authenticateUser, uploadMessageImage);
 router.get("/unread-count", authenticateUser, getUnreadMessagesCount);
 router.get("/unread-by-chat", authenticateUser, getUnreadCountByChat);
+router.patch("/mark-read", authenticateUser, markMessagesAsRead);
 router.route("/:id").patch(authenticateUser, updateMessage).delete(authenticateUser, deleteMessage);
 
 module.exports = router;

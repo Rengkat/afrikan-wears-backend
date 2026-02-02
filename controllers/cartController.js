@@ -46,7 +46,7 @@ const addToCart = async (req, res, next) => {
             items: [{ product: productId, quantity, price }],
           },
         ],
-        { session }
+        { session },
       );
     } else {
       const itemIndex = cart.items.findIndex((item) => item.product.toString() === productId);
@@ -231,7 +231,7 @@ const clearCart = async (req, res, next) => {
     const cart = await Cart.findOneAndUpdate(
       { user: userId },
       { $set: { items: [] } },
-      { new: true, session }
+      { new: true, session },
     );
 
     if (!cart) {
@@ -253,11 +253,92 @@ const clearCart = async (req, res, next) => {
     session.endSession();
   }
 };
+// Move item from cart to wishlist
+const moveToWishlist = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
+  try {
+    const { productId } = req.body;
+    const userId = req.user.id;
+
+    if (!productId) {
+      throw new CustomError.BadRequestError("Please provide product ID");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      throw new CustomError.BadRequestError("Invalid product ID");
+    }
+
+    // 1. Remove from cart
+    const cart = await Cart.findOne({ user: userId }).session(session);
+    if (!cart) {
+      throw new CustomError.NotFoundError("Cart not found");
+    }
+
+    const itemIndex = cart.items.findIndex((item) => item.product.toString() === productId);
+
+    if (itemIndex === -1) {
+      throw new CustomError.NotFoundError("Product not found in cart");
+    }
+
+    // Verify product exists
+    const product = await Product.findById(productId).session(session);
+    if (!product) {
+      throw new CustomError.NotFoundError("Product not found");
+    }
+
+    // Remove from cart
+    cart.items.splice(itemIndex, 1);
+    await cart.save({ session });
+
+    // 2. Add to wishlist
+    let wishlist = await Wishlist.findOne({ user: userId }).session(session);
+
+    if (!wishlist) {
+      wishlist = await Wishlist.create(
+        [
+          {
+            user: userId,
+            items: [{ product: productId }],
+          },
+        ],
+        { session },
+      );
+    } else {
+      // Check if product already exists in wishlist
+      const existsInWishlist = wishlist.items.some((item) => item.product.toString() === productId);
+
+      if (!existsInWishlist) {
+        wishlist.items.push({ product: productId });
+        await wishlist.save({ session });
+      }
+    }
+
+    await session.commitTransaction();
+    await clearCache(`cart:${userId}`);
+    await clearCache(`wishlist:${userId}`);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Product moved to wishlist successfully",
+      data: {
+        cart,
+        wishlist,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
 module.exports = {
   addToCart,
   removeFromCart,
   updateCart,
   getAllCartProducts,
   clearCart,
+  moveToWishlist,
 };
