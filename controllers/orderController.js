@@ -41,7 +41,7 @@ const createOrder = async (req, res, next) => {
       // For standard orders, check stock availability
       if (orderType === "standard" && product.stock < item.quantity) {
         throw new CustomError.BadRequestError(
-          `Insufficient stock for ${product.name}. Only ${product.stock} available`
+          `Insufficient stock for ${product.name}. Only ${product.stock} available`,
         );
       }
 
@@ -71,7 +71,7 @@ const createOrder = async (req, res, next) => {
     // Calculate prices
     const itemsPrice = orderItems.reduce(
       (total, item) => total + item.priceAtPurchase * item.quantity,
-      0
+      0,
     );
     const taxPrice = itemsPrice * 0.1;
     const shippingPrice = 15;
@@ -108,7 +108,7 @@ const createOrder = async (req, res, next) => {
     else if (paymentMethod === "cash_on_delivery") {
       if (orderType === "custom") {
         throw new CustomError.BadRequestError(
-          "Cash on delivery is only available for final payment of custom orders"
+          "Cash on delivery is only available for final payment of custom orders",
         );
       }
       paymentStatus = "pending";
@@ -116,17 +116,19 @@ const createOrder = async (req, res, next) => {
       transactionId = generatePaymentReference("COD", userId);
     }
     // Online payment (Paystack)
-    else if (paymentMethod === "online") {
+    else if (paymentMethod === "credit_card" || paymentMethod === "bank_transfer") {
       // Generate reference in controller
       transactionId = generatePaymentReference("ORDER", userId);
 
+      // We'll ONLY pass the reference in the callback URL
+      // The order will be found using the reference in the verifyPayment function
       paymentInit = await PaymentService.initializePayment({
         user: req.user,
         amount: initialPayment,
         purpose: "order_payment",
         description: `Payment for ${orderType} order`,
         reference: transactionId,
-        callbackUrl: `${process.env.ORIGIN}/api/orders/verify-payment?orderId=${transactionId}`,
+        callbackUrl: `${process.env.ORIGIN}/account/user/orders/verify-payment?reference=${transactionId}`,
         metadata: {
           order_type: orderType,
         },
@@ -158,14 +160,11 @@ const createOrder = async (req, res, next) => {
           orderStatus: paymentStatus === "completed" ? "processing" : "pending",
         },
       ],
-      { session }
+      { session },
     );
 
-    // Update callback URL with actual order ID for online payments
-    if (paymentMethod === "online" && paymentInit) {
-      const updatedCallbackUrl = `${process.env.ORIGIN}/api/orders/verify-payment?orderId=${order[0]._id}&reference=${transactionId}`;
-
-      // Create transaction record for online payments
+    // Create transaction record for online payments
+    if ((paymentMethod === "credit_card" || paymentMethod === "bank_transfer") && paymentInit) {
       await PaymentService.createPendingTransaction({
         user: req.user,
         amount: initialPayment,
@@ -179,9 +178,6 @@ const createOrder = async (req, res, next) => {
         relatedModelId: order[0]._id,
         session,
       });
-
-      // Note: In a real scenario, you might want to update the Paystack transaction
-      // with the actual callback URL, but this requires additional Paystack API calls
     }
 
     // For standard orders and completed payments, reduce stock immediately
@@ -197,7 +193,8 @@ const createOrder = async (req, res, next) => {
 
     // Clear cart after successful order creation
     await Cart.findOneAndDelete({ user: userId }).session(session);
-
+    // then delete cart from cache
+    clearCache(`cart:${userId}`);
     await session.commitTransaction();
 
     res.status(StatusCodes.OK).json({
@@ -213,7 +210,7 @@ const createOrder = async (req, res, next) => {
   }
 };
 
-// Add a new controller for final payment
+//  final payment
 const completeCustomOrderPayment = async (req, res, next) => {
   const { orderId } = req.params;
   const { reference } = req.body;
@@ -275,7 +272,7 @@ const completeCustomOrderPayment = async (req, res, next) => {
     await Promise.all(
       order.orderItems
         .map((item) => (item.stylist ? clearCache(`stylist:${item.stylist}:orders*`) : null))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     res.status(StatusCodes.OK).json({
@@ -290,13 +287,11 @@ const completeCustomOrderPayment = async (req, res, next) => {
     session.endSession();
   }
 };
-
 const verifyPayment = async (req, res, next) => {
-  const { orderId } = req.query;
   const { reference } = req.query;
 
-  if (!orderId || !reference) {
-    throw new CustomError.BadRequestError("Order ID and payment reference are required");
+  if (!reference) {
+    throw new CustomError.BadRequestError("Payment reference is required");
   }
 
   const session = await mongoose.startSession();
@@ -311,20 +306,34 @@ const verifyPayment = async (req, res, next) => {
       throw new CustomError.BadRequestError("Invalid payment response");
     }
 
-    const order = await Order.findById(orderId).session(session);
+    // Find order by transactionId (reference)
+    const order = await Order.findOne({ "paymentInfo.transactionId": reference }).session(session);
+    
     if (!order) {
-      throw new CustomError.NotFoundError(`Order not found: ${orderId}`);
+      throw new CustomError.NotFoundError(`Order not found with reference: ${reference}`);
     }
 
     if (!order.orderItems || order.orderItems.length === 0) {
       throw new CustomError.BadRequestError("Order has no items");
     }
 
-    // Check payment status
+    // Check if payment is already completed to prevent double processing
+    if (order.paymentInfo.paymentStatus === "completed") {
+      await session.commitTransaction();
+      session.endSession();
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        message: "Payment already verified",
+        order,
+      });
+    }
+
+    // Check payment status from Paystack
     if (paymentData.status !== "success") {
       order.paymentInfo.paymentStatus = "failed";
       await order.save({ session });
       await session.commitTransaction();
+      session.endSession();
       return res.status(StatusCodes.BAD_REQUEST).json({
         success: false,
         message: "Payment failed",
@@ -333,14 +342,16 @@ const verifyPayment = async (req, res, next) => {
     }
 
     // Check if amount paid matches order total or initial payment
-    const amountPaid = paymentData.amount / 100;
-    const expectedAmount =
-      order.paymentInfo.balanceDue > 0
-        ? order.totalPrice - order.paymentInfo.amountPaid
-        : order.totalPrice;
+    const amountPaid = paymentData.amount / 100; // Paystack returns amount in kobo
+    const expectedAmount = order.paymentInfo.balanceDue > 0
+      ? order.totalPrice - order.paymentInfo.amountPaid // For final payment
+      : order.totalPrice; // For initial payment
 
-    if (amountPaid < expectedAmount) {
-      throw new CustomError.BadRequestError("Amount paid is less than required amount");
+    // Allow small tolerance for floating point differences
+    if (Math.abs(amountPaid - expectedAmount) > 1) { // More than 1 unit difference
+      throw new CustomError.BadRequestError(
+        `Amount paid (${amountPaid}) does not match required amount (${expectedAmount})`
+      );
     }
 
     // Update order status based on payment
@@ -358,7 +369,7 @@ const verifyPayment = async (req, res, next) => {
     order.paymentInfo.paymentDate = new Date();
     order.orderStatus = "processing";
 
-    // Reduce product stock for standard orders
+    // Reduce product stock for standard orders (only if not already reduced)
     const isStandardOrder = order.orderItems.every((item) => item.orderType === "standard");
     if (isStandardOrder) {
       for (const item of order.orderItems) {
@@ -366,8 +377,12 @@ const verifyPayment = async (req, res, next) => {
         if (!product) {
           throw new CustomError.NotFoundError(`Product not found: ${item.product}`);
         }
-        product.stock -= item.quantity;
-        await product.save({ session });
+        
+        // Check if stock was already reduced (to prevent double deduction)
+        if (product.stock >= item.quantity) {
+          product.stock -= item.quantity;
+          await product.save({ session });
+        }
       }
     }
 
@@ -375,80 +390,89 @@ const verifyPayment = async (req, res, next) => {
 
     // Clear cart and cache
     await Cart.findOneAndDelete({ user: order.customer }).session(session);
-    await Promise.all([
+    
+    // Use Promise.allSettled instead of Promise.all to handle individual failures
+    await Promise.allSettled([
       clearCache(`user:${order.customer}:orders*`),
+      clearCache(`cart:${order.customer}`),
       ...order.orderItems
         .map((item) => (item.stylist ? clearCache(`stylist:${item.stylist}:orders*`) : null))
         .filter(Boolean),
     ]);
 
     await session.commitTransaction();
+    session.endSession();
 
-    // Notify stylists and admin
-    const customer = await User.findById(order.customer).select("name email").lean();
-    const customerName = customer?.name || "Customer";
+    // Notify stylists and admin (do this after transaction is committed)
+    try {
+      const customer = await User.findById(order.customer).select("name email").lean();
+      const customerName = customer?.name || "Customer";
 
-    // Admin notification
-    const adminNotification = {
-      type: "new_order",
-      message: `New order #${order.orderNumber} (N${order.totalPrice})`,
-      data: {
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        customerName,
-        totalAmount: order.totalPrice,
-        itemsCount: order.orderItems.length,
-        timestamp: new Date(),
-      },
-    };
-    emitNotification(req.io, "newNotification", adminNotification, "admin_room");
-
-    // Stylist notifications
-    const stylistNotifications = new Map();
-    for (const item of order.orderItems) {
-      if (!item.stylist) continue;
-
-      const stylistId = item.stylist.toString();
-      const product = await Product.findById(item.product).select("name").lean();
-
-      if (!stylistNotifications.has(stylistId)) {
-        const stylist = await Stylist.findById(stylistId).select("name").lean();
-        stylistNotifications.set(stylistId, {
-          stylistName: stylist?.name || "Stylist",
-          items: [],
-        });
-      }
-
-      stylistNotifications.get(stylistId).items.push({
-        productName: product?.name || "Product",
-        quantity: item.quantity,
-        price: item.priceAtPurchase,
-      });
-    }
-
-    // Send individual notifications to each stylist
-    for (const [stylistId, data] of stylistNotifications) {
-      const stylistNotification = {
+      // Admin notification
+      const adminNotification = {
         type: "new_order",
-        message: `New order for your products (Order #${order.orderNumber})`,
+        message: `New order #${order.orderNumber || order._id.toString().slice(-8)} (N${order.totalPrice})`,
         data: {
           orderId: order._id,
-          orderNumber: order.orderNumber,
+          orderNumber: order.orderNumber || order._id.toString().slice(-8),
           customerName,
-          items: data.items,
+          totalAmount: order.totalPrice,
+          itemsCount: order.orderItems.length,
           timestamp: new Date(),
         },
       };
-      emitNotification(req.io, "newNotification", stylistNotification, stylistId);
-    }
+      emitNotification(req.io, "newNotification", adminNotification, "admin_room");
 
-    // Send email to customer
-    await sendPlacedOrderEmail({
-      name: customer?.name || "Customer",
-      email: customer?.email,
-      origin: process.env.ORIGIN,
-      payload: order,
-    });
+      // Stylist notifications
+      const stylistNotifications = new Map();
+      for (const item of order.orderItems) {
+        if (!item.stylist) continue;
+
+        const stylistId = item.stylist.toString();
+        const product = await Product.findById(item.product).select("name").lean();
+
+        if (!stylistNotifications.has(stylistId)) {
+          const stylist = await Stylist.findById(stylistId).select("name").lean();
+          stylistNotifications.set(stylistId, {
+            stylistName: stylist?.name || "Stylist",
+            items: [],
+          });
+        }
+
+        stylistNotifications.get(stylistId).items.push({
+          productName: product?.name || "Product",
+          quantity: item.quantity,
+          price: item.priceAtPurchase,
+        });
+      }
+
+      // Send individual notifications to each stylist
+      for (const [stylistId, data] of stylistNotifications) {
+        const stylistNotification = {
+          type: "new_order",
+          message: `New order for your products (Order #${order.orderNumber || order._id.toString().slice(-8)})`,
+          data: {
+            orderId: order._id,
+            orderNumber: order.orderNumber || order._id.toString().slice(-8),
+            customerName,
+            items: data.items,
+            timestamp: new Date(),
+          },
+        };
+        emitNotification(req.io, "newNotification", stylistNotification, stylistId);
+      }
+
+      // Send email to customer
+      await sendPlacedOrderEmail({
+        name: customer?.name || "Customer",
+        email: customer?.email,
+        origin: process.env.ORIGIN,
+        payload: order,
+      });
+    } catch (notificationError) {
+      // Log notification errors but don't fail the request
+      console.error("Notification error:", notificationError);
+    }
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -456,10 +480,19 @@ const verifyPayment = async (req, res, next) => {
       order,
     });
   } catch (error) {
-    await session.abortTransaction();
+    // Only abort transaction if it's still active
+    try {
+      // Check if session is still in a transaction and not ended
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+    } catch (abortError) {
+      console.error("Error aborting transaction:", abortError);
+    } finally {
+      session.endSession();
+    }
+    
     next(error);
-  } finally {
-    session.endSession();
   }
 };
 
@@ -696,7 +729,7 @@ const updateOrderItemStatus = async (req, res, next) => {
     }
 
     const itemIndex = order.orderItems.findIndex(
-      (item) => item._id.toString() === itemId && item.stylist.toString() === userId.toString()
+      (item) => item._id.toString() === itemId && item.stylist.toString() === userId.toString(),
     );
 
     if (itemIndex === -1) {

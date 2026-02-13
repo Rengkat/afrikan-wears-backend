@@ -3,7 +3,7 @@ const Product = require("../models/productModel");
 const CustomError = require("../errors");
 const { StatusCodes } = require("http-status-codes");
 const { getFromCache, setInCache, clearCache } = require("../utils/redisClient");
-
+const Wishlist = require("../models/wishlistModel");
 const mongoose = require("mongoose");
 const addToCart = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -172,7 +172,7 @@ const updateCart = async (req, res, next) => {
   session.startTransaction();
 
   try {
-    const { productId } = req.params;
+    const { id: productId } = req.params;
     const { quantity } = req.body;
     const userId = req.user.id;
 

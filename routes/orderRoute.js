@@ -29,24 +29,24 @@ router.get(
   "/stylist/orders",
   authenticateUser,
   adminAndStylistAuthorization("stylist"),
-  getStylistOrders
+  getStylistOrders,
 );
+router.get("/verify-payment", authenticateUser, verifyPayment);
 router.post("/:orderId/complete-payment", authenticateUser, completeCustomOrderPayment);
-router.post("/:orderId/verify-payment", authenticateUser, verifyPayment);
 router.get("/:id", authenticateUser, getSingleOrder);
 
 router.patch(
   "/:id/status",
   authenticateUser,
   adminAndStylistAuthorization("admin", "stylist"),
-  updateOrderStatus
+  updateOrderStatus,
 );
 
 router.patch(
   "/:id/items/:itemId/status",
   authenticateUser,
   adminAndStylistAuthorization("admin", "stylist"),
-  updateOrderItemStatus
+  updateOrderItemStatus,
 );
 
 module.exports = router;
