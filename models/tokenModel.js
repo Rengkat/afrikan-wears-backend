@@ -1,10 +1,17 @@
 const mongoose = require("mongoose");
 
-const TokenSchema = new mongoose.Schema({
-  refreshToken: { type: String },
-  ip: { type: String },
-  userAgent: { type: String },
-  isValid: { type: Boolean, default: true },
-  user: { type: mongoose.Schema.ObjectId, ref: "User" },
-});
+const TokenSchema = new mongoose.Schema(
+  {
+    refreshToken: { type: String, required: true },
+    user: { type: mongoose.Schema.ObjectId, ref: "User", required: true, index: true },
+    deviceInfo: {
+      ip: { type: String },
+      userAgent: { type: String },
+      deviceId: { type: String },
+    },
+    isValid: { type: Boolean, default: true },
+    expiresAt: { type: Date, required: true, index: { expires: 0 } }, //auto delete expired
+  },
+  { timestamps: true },
+);
 module.exports = mongoose.model("Token", TokenSchema);

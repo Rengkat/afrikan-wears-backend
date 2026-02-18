@@ -70,6 +70,7 @@ app.get("/", (req, res) => {
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
   "http://localhost:5000",
   "http://localhost:3000",
+  "https://afrikan-wears-backend.onrender.com",
 ];
 app.use(
   cors({
