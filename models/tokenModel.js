@@ -14,4 +14,6 @@ const TokenSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+TokenSchema.index({ user: 1, isValid: 1 }); // Index on user field for faster queries
+TokenSchema.index({ refreshToken: 1 }); // TTL index to auto-delete expired tokens
 module.exports = mongoose.model("Token", TokenSchema);
