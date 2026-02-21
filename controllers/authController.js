@@ -476,6 +476,31 @@ const refreshTokens = async (req, res, next) => {
     next(error);
   }
 };
+// ─── Get Active Sessions ──────────────────────────────────────────────────────
+
+const getActiveSessions = async (req, res, next) => {
+  try {
+    const sessions = await Token.find({
+      user: req.user.id,
+      isValid: true,
+      expiresAt: { $gt: new Date() },
+    }).select("deviceInfo lastUsed createdAt expiresAt");
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      count: sessions.length,
+      sessions: sessions.map((s) => ({
+        id: s._id,
+        device: s.deviceInfo,
+        lastActive: s.lastUsed,
+        expiresAt: s.expiresAt,
+        createdAt: s.createdAt,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 // ─── Cookie Helper ────────────────────────────────────────────────────────────
 
 const clearAuthCookies = (res) => {
