@@ -5,25 +5,35 @@ const createJwt = ({ payload }) => {
 };
 const isTokenVerified = (token) => jwt.verify(token, process.env.JWT_SECRET);
 const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
-  const isProduction = process.env.NODE_ENV === "production";
-  const accessTokenJWT = createJwt({ payload: { accessToken: userPayload } });
-  const refreshTokenJWT = createJwt({ payload: { accessToken: userPayload, refreshToken } });
+  const accessTokenJWT = createJWT({
+    payload: { accessToken: userPayload },
+    expiresIn: process.env.JWT_ACCESS_LIFETIME || "15m",
+  });
 
-  // Attach accessToken (short-lived,)
-  const commonCookieOptions = {
+  const refreshTokenJWT = createJWT({
+    payload: { accessToken: userPayload, refreshToken },
+    expiresIn: process.env.JWT_REFRESH_LIFETIME || "7d",
+  });
+
+  const isProduction = process.env.NODE_ENV === "production";
+
+  const cookieDefaults = {
     httpOnly: true,
-    signed: true,
     secure: isProduction,
+    signed: true,
     sameSite: isProduction ? "none" : "lax",
+    path: "/",
   };
+
   res.cookie("accessToken", accessTokenJWT, {
-    ...commonCookieOptions,
+    ...cookieDefaults,
     maxAge: 1000 * 60 * 15,
   });
 
   res.cookie("refreshToken", refreshTokenJWT, {
-    ...commonCookieOptions,
-    expires: new Date(Date.now() + 100 * 24 * 60 * 60 * 1000),
+    ...cookieDefaults,
+    maxAge: 1000 * 60 * 60 * 24 * 7,
   });
 };
+
 module.exports = { attachTokenToResponse, isTokenVerified };
