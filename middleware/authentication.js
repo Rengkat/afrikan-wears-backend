@@ -4,7 +4,7 @@ const Token = require("../models/tokenModel");
 const crypto = require("crypto");
 const User = require("../models/userModel");
 
-// Main authentication middleware (unchanged - looks good)
+// Main authentication middleware
 const authenticateUser = async (req, res, next) => {
   try {
     const { accessToken, refreshToken } = req.signedCookies;
@@ -117,7 +117,7 @@ const authorize = (...allowedRoles) => {
   return (req, res, next) => {
     if (!allowedRoles.includes(req.user.role)) {
       throw new CustomError.UnauthorizedError(
-        `Unauthorized. Allowed roles: ${allowedRoles.join(", ")}`
+        `Unauthorized. Allowed roles: ${allowedRoles.join(", ")}`,
       );
     }
     next();

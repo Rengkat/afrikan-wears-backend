@@ -8,17 +8,10 @@ const crypto = require("crypto");
 const sendVerificationEmail = require("../utils/Email/sendVerificationMail");
 const { StatusCodes } = require("http-status-codes");
 const { clearCache } = require("../utils/redisClient");
-// ─── Helpers ────────────────────────────────────────────────────────────────
-const getDeviceInfo = (req) => ({
-  ip: req.ip,
-  userAgent: req.headers["user-agent"],
-  deviceId: req.headers["x-device-id"] || crypto.randomBytes(16).toString("hex"),
-});
-const getTokenExpity = () => {
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 7);
-  return expiresAt;
-};
+const clearAuthCookies = require("../utils/helper/clearAuthCookies");
+const getDeviceInfo = require("../utils/helper/getDeviceInfo");
+const getTokenExpity = require("../utils/helper/getTokenExpity");
+
 // ─── Controllers ─────────────────────────────────────────────────────────────
 const register = async (req, res, next) => {
   try {
@@ -548,18 +541,7 @@ const revokeAllOtherSessions = async (req, res, next) => {
     next(error);
   }
 };
-// ─── Cookie Helper ────────────────────────────────────────────────────────────
 
-const clearAuthCookies = (res) => {
-  const opts = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    path: "/",
-  };
-  res.cookie("accessToken", "", { ...opts, maxAge: 0 });
-  res.cookie("refreshToken", "", { ...opts, maxAge: 0 });
-};
 module.exports = {
   register,
   resendVerificationEmail,
