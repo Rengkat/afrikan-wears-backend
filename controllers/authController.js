@@ -114,7 +114,7 @@ const verifyEmail = async (req, res, next) => {
     next(error);
   }
 };
-
+// ─── Resend Verification Email ─────────────────────────────────────────────────────────────
 const resendVerificationEmail = async (req, res, next) => {
   try {
     const { email } = req.body;
@@ -164,6 +164,7 @@ const resendVerificationEmail = async (req, res, next) => {
     next(error);
   }
 };
+// ─── Login ─────────────────────────────────────────────────────────────
 const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -191,44 +192,41 @@ const login = async (req, res, next) => {
     }
 
     // Create access token
-    const userPayload = createUserPayload(user);
-    let refreshToken;
+    const deviceInfo = getDeviceInfo(req);
+    const refreshToken = crypto.randomBytes(40).toString("hex");
+    const expiresAt = getTokenExpity();
+    const MAX_SESSIONS = 5;
 
-    // Check if refresh token exists and is valid
-    const existingToken = await Token.findOne({ user: user._id });
-
-    if (existingToken && existingToken.isValid) {
-      // Use existing valid token
-      refreshToken = existingToken.refreshToken;
-    } else {
-      // If no valid token exists, create a new one
-      refreshToken = crypto.randomBytes(40).toString("hex");
-      const ip = req.ip;
-      const userAgent = req.headers["user-agent"];
-
-      if (existingToken) {
-        // Update existing invalid token
-        existingToken.refreshToken = refreshToken;
-        existingToken.isValid = true;
-        existingToken.ip = ip;
-        existingToken.userAgent = userAgent;
-        await existingToken.save();
-      } else {
-        // Create new token
-        await Token.create({
-          refreshToken,
-          ip,
-          userAgent,
-          user: user._id,
-        });
+    //Count active valid sessions for this user
+    const activeSessions = await Token.countDocuments({
+      user: user._id,
+      isValid: true,
+      expiresAt: { $gt: new Date() },
+    });
+    // check if user has exceeded max sessions then evict oldest session
+    if (activeSessions >= MAX_SESSIONS) {
+      const oldest = await Token.findOne({ user: user._id, isValid: true }).sort({ lastUsed: 1 });
+      if (oldest) {
+        oldest.isValid = false;
+        await oldest.save();
       }
     }
+    // Create a new token for this session
+    await Token.create({
+      refreshToken,
+      user: user._id,
+      deviceInfo,
+      expiresAt,
+      lastUsed: new Date(),
+    });
 
+    const userPayload = createUserPayload(user);
     // Attach tokens to response
     attachTokenToResponse({ res, userPayload, refreshToken });
     res.status(StatusCodes.OK).json({
       success: true,
       user: userPayload,
+      deviceId: deviceInfo.deviceId,
       message: "Logged in successfully",
     });
   } catch (error) {

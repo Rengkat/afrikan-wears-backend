@@ -10,10 +10,14 @@ const TokenSchema = new mongoose.Schema(
       deviceId: { type: String },
     },
     isValid: { type: Boolean, default: true },
+    lastUsed: {
+      type: Date,
+      default: Date.now,
+    },
     expiresAt: { type: Date, required: true, index: { expires: 0 } }, //auto delete expired
   },
   { timestamps: true },
 );
-TokenSchema.index({ user: 1, isValid: 1 }); // Index on user field for faster queries
-TokenSchema.index({ refreshToken: 1 }); // TTL index to auto-delete expired tokens
+TokenSchema.index({ user: 1, isValid: 1 });
+TokenSchema.index({ refreshToken: 1 });
 module.exports = mongoose.model("Token", TokenSchema);
