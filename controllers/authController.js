@@ -365,6 +365,8 @@ const forgotPassword = async (req, res, next) => {
     next(error);
   }
 };
+
+// ─── Reset Password ─────────────────────────────────────────────────────────────
 const resetPassword = async (req, res, next) => {
   try {
     const { email, verificationToken, password } = req.body;
@@ -390,71 +392,87 @@ const resetPassword = async (req, res, next) => {
     next(error);
   }
 };
+
+// ─── Refresh Tokens ─────────────────────────────────────────────────────────────
 const refreshTokens = async (req, res, next) => {
   try {
-    const { refreshToken: incomingRefreshToken } = req.signedCookies;
+    const { refreshToken: incomingJWT } = req.signedCookies;
 
-    if (!incomingRefreshToken) {
+    if (!incomingJWT) {
       throw new CustomError.UnauthenticatedError("No refresh token provided");
     }
 
-    // 2. Verify the JWT refresh token
     let payload;
     try {
-      payload = isTokenVerified(incomingRefreshToken);
-    } catch (jwtError) {
+      payload = isTokenVerified(incomingJWT);
+    } catch {
       throw new CustomError.UnauthenticatedError("Invalid or expired refresh token");
     }
 
-    // 3. Find the matching token in database
-    const existingToken = await Token.findOne({
-      user: payload.accessToken.id,
-      refreshToken: payload.refreshToken,
-      isValid: true,
-    });
+    const { accessToken: userPayloadFromJWT, refreshToken: rawRefreshToken } = payload;
 
-    if (!existingToken) {
-      throw new CustomError.UnauthenticatedError("Invalid session - token not found");
-    }
-
-    // 4. Get the associated user
-    const user = await User.findById(payload.accessToken.id);
-    if (!user) {
-      throw new CustomError.NotFoundError("User not found");
-    }
-
-    // 5. Rotate refresh token (generate new one, invalidate old)
+    // Atomic find-and-invalidate: only succeeds if token exists AND isValid === true
+    // Two concurrent requests with the same token — only one will get a document back
     const newRefreshToken = crypto.randomBytes(40).toString("hex");
-    existingToken.refreshToken = newRefreshToken;
-    await existingToken.save();
 
-    // 6. Create and attach new tokens
-    const userPayload = createUserPayload(user);
-    attachTokenToResponse({
-      res,
-      userPayload,
-      refreshToken: newRefreshToken,
-    });
+    const existingToken = await Token.findOneAndUpdate(
+      {
+        user: userPayloadFromJWT.id,
+        refreshToken: rawRefreshToken,
+        isValid: true,
+        expiresAt: { $gt: new Date() },
+      },
+      {
+        $set: {
+          refreshToken: newRefreshToken,
+          lastUsed: new Date(),
+          expiresAt: getTokenExpiry(),
+          "deviceInfo.ip": req.ip,
+        },
+      },
+      { new: false },
+    );
 
-    // 7. Return success response with user data
+    // If nothing was updated, we need to figure out why
+    if (!existingToken) {
+      const stalledToken = await Token.findOne({
+        user: userPayloadFromJWT.id,
+        refreshToken: rawRefreshToken,
+      });
+
+      if (!stalledToken) {
+        // Token never existed or was already wiped — treat as breach
+        await Token.updateMany({ user: userPayloadFromJWT.id }, { isValid: false });
+        throw new CustomError.UnauthenticatedError(
+          "Invalid session. All sessions have been revoked.",
+        );
+      }
+
+      if (!stalledToken.isValid) {
+        // Token exists but is invalid — reuse detected
+        await Token.updateMany({ user: userPayloadFromJWT.id }, { isValid: false });
+        throw new CustomError.UnauthenticatedError(
+          "Token reuse detected. All sessions have been revoked for your safety.",
+        );
+      }
+
+      // Token exists and is valid but expired (matched by findOne but not findOneAndUpdate)
+      throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
+    }
+
+    const user = await User.findById(userPayloadFromJWT.id);
+    if (!user) throw new CustomError.NotFoundError("User not found");
+
+    const newUserPayload = createUserPayload(user);
+    attachTokenToResponse({ res, userPayload: newUserPayload, refreshToken: newRefreshToken });
+
     res.status(StatusCodes.OK).json({
       success: true,
-      user: userPayload,
+      user: newUserPayload,
       message: "Tokens refreshed successfully",
     });
   } catch (error) {
-    // Clear cookies on any error
-    res.cookie("accessToken", "logout", {
-      httpOnly: true,
-      expires: new Date(Date.now()),
-      secure: process.env.NODE_ENV === "production",
-    });
-    res.cookie("refreshToken", "logout", {
-      httpOnly: true,
-      expires: new Date(Date.now()),
-      secure: process.env.NODE_ENV === "production",
-    });
-
+    clearAuthCookies(res);
     next(error);
   }
 };
