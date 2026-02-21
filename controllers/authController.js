@@ -152,7 +152,6 @@ const resendVerificationEmail = async (req, res, next) => {
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Verification email sent successfully",
-      // Optionally include these for debugging (remove in production)
       debug:
         process.env.NODE_ENV === "development"
           ? {
