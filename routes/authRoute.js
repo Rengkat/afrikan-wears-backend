@@ -1,44 +1,39 @@
+const express = require("express");
+const router = express.Router();
+const { authenticateUser } = require("../middleware/authentication");
 const {
   register,
   verifyEmail,
+  resendVerificationEmail,
   login,
   logout,
-  forgotPassword,
-  resetPassword,
-  googleAuth,
-  resendVerificationEmail,
-  getCurrentUser,
   refreshTokens,
   validateTokens,
+  getCurrentUser,
+  getActiveSessions,
+  revokeSession,
+  revokeAllOtherSessions,
+  forgotPassword,
+  resetPassword,
 } = require("../controllers/authController");
-const passport = require("passport");
-const express = require("express");
-const { authenticateUser } = require("../middleware/authentication");
-const router = express.Router();
+
+// ─── Public Routes ────────────────────────────────────────────────────────────
 router.post("/register", register);
 router.post("/verify-email", verifyEmail);
 router.post("/reverify-email", resendVerificationEmail);
 router.post("/login", login);
-router.get("/me", authenticateUser, getCurrentUser);
-router.post("/logout", authenticateUser, logout);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.post("/refresh-token", refreshTokens);
 router.get("/validate-tokens", validateTokens);
-// router.get(
-//   "/google",
-//   passport.authenticate("google", {
-//     scope: ["profile", "email"],
-//     session: false,
-//   })
-// );
 
-// router.get(
-//   "/google/callback",
-//   passport.authenticate("google", {
-//     failureRedirect: "/login",
-//     session: false,
-//   }),
-//   googleAuth
-// );
+// ─── Protected Routes ─────────────────────────────────────────────────────────
+router.get("/me", authenticateUser, getCurrentUser);
+router.post("/logout", authenticateUser, logout);
+
+// ─── Session Management ───────────────────────────────────────────────────────
+router.get("/sessions", authenticateUser, getActiveSessions);
+router.delete("/sessions/:sessionId", authenticateUser, revokeSession);
+router.delete("/sessions", authenticateUser, revokeAllOtherSessions);
+
 module.exports = router;

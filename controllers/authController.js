@@ -574,4 +574,5 @@ module.exports = {
   validateTokens,
   getActiveSessions,
   revokeSession,
+  revokeAllOtherSessions,
 };
