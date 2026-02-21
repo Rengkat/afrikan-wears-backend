@@ -305,25 +305,26 @@ const validateTokens = async (req, res, next) => {
 // ─── Logout ─────────────────────────────────────────────────────────────
 const logout = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-    if (!userId) {
-      throw new CustomError.UnauthenticatedError("Not authenticated");
+    const { refreshToken: incomingJWT } = req.signedCookies;
+    if (incomingJWT) {
+      try {
+        const payload = isTokenVerified(incomingJWT);
+        // invalidate only this session's refresh token
+        await Token.findOneAndUpdate(
+          { user: payload.accessToken.id, refreshToken: payload.refreshToken },
+          { isValid: false },
+          { new: true },
+        );
+      } catch (error) {
+        // JWT expired but still clean up by user
+        if (req.user.id) {
+          await Token.updateMany({ user: req.user.id }, { isValid: false }, { new: true });
+        }
+      }
     }
 
-    // Invalidate the refresh token in the database
-    await Token.findOneAndUpdate({ user: userId }, { isValid: false }, { new: true });
-
-    res.cookie("accessToken", "logout", {
-      httpOnly: true,
-      expires: new Date(Date.now()),
-      secure: process.env.NODE_ENV === "production",
-    });
-
-    res.cookie("refreshToken", "logout", {
-      httpOnly: true,
-      expires: new Date(Date.now()),
-      secure: process.env.NODE_ENV === "production",
-    });
+    //CLEAR COOKIES
+    clearAuthCookies(res);
 
     res.status(StatusCodes.OK).json({
       success: true,
