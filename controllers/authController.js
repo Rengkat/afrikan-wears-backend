@@ -233,11 +233,12 @@ const login = async (req, res, next) => {
     next(error);
   }
 };
+
+// ─── Get Current User ─────────────────────────────────────────────────────────────
 const getCurrentUser = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    // Add population if you need related data (like company info)
     const user = await User.findById(userId)
       .select("-password -verificationToken -verificationTokenExpirationDate -__v")
       .populate({
@@ -266,10 +267,10 @@ const getCurrentUser = async (req, res, next) => {
     next(error);
   }
 };
-// for nextjs middleware
+
+// ─── Validate Tokens (for Next.js middleware) ─────────────────────────────────────────────────────────────
 const validateTokens = async (req, res, next) => {
   try {
-    // Your existing authenticateUser middleware logic
     const { accessToken, refreshToken } = req.signedCookies;
 
     if (accessToken) {
@@ -284,6 +285,7 @@ const validateTokens = async (req, res, next) => {
           user: payload.accessToken.id,
           refreshToken: payload.refreshToken,
           isValid: true,
+          expiresAt: { $gt: new Date() },
         });
 
         if (existingToken) {
@@ -300,6 +302,7 @@ const validateTokens = async (req, res, next) => {
   }
 };
 
+// ─── Logout ─────────────────────────────────────────────────────────────
 const logout = async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -453,6 +456,18 @@ const refreshTokens = async (req, res, next) => {
 
     next(error);
   }
+};
+// ─── Cookie Helper ────────────────────────────────────────────────────────────
+
+const clearAuthCookies = (res) => {
+  const opts = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path: "/",
+  };
+  res.cookie("accessToken", "", { ...opts, maxAge: 0 });
+  res.cookie("refreshToken", "", { ...opts, maxAge: 0 });
 };
 module.exports = {
   register,
