@@ -19,32 +19,29 @@ const getTokenExpity = () => {
   expiresAt.setDate(expiresAt.getDate() + 7);
   return expiresAt;
 };
+// ─── Controllers ─────────────────────────────────────────────────────────────
 const register = async (req, res, next) => {
   try {
     const { firstName, surname, email, password, companyName } = req.body;
-    // check if details are present
+
     if (!firstName || !surname || !email || !password) {
       throw new CustomError.BadRequestError("Please provide all credentials");
     }
 
-    // check if the email exists
     const existedUser = await User.findOne({ email });
     if (existedUser) {
       throw new CustomError.BadRequestError("Sorry, email already exists");
     }
 
-    // create verification token
     const verificationToken = crypto.randomBytes(40).toString("hex");
-    const expiration = new Date(Date.now() + 1000 * 60 * 60);
+    const expiration = new Date(Date.now() + 1000 * 60 * 60); // 1 hour
 
-    // create a user
     const userCount = await User.countDocuments();
     let company = null;
 
-    // If companyName is provided, create the stylist first
     if (companyName) {
       company = await Stylist.create({
-        companyName: companyName,
+        companyName,
         description: `${firstName} ${surname}'s styling company`,
       });
     }
@@ -60,13 +57,11 @@ const register = async (req, res, next) => {
       verificationTokenExpirationDate: expiration,
     });
 
-    // If company was created, update it with the owner reference
     if (company) {
       company.owner = user._id;
       await company.save();
     }
 
-    // send verification token email
     sendVerificationEmail({
       email: user.email,
       origin: process.env.ORIGIN,
@@ -77,14 +72,6 @@ const register = async (req, res, next) => {
     res.status(StatusCodes.CREATED).json({
       message: "Account created successfully. Kindly verify your email",
       success: true,
-      user: {
-        _id: user._id,
-        firstName: user.firstName,
-        surname: user.surname,
-        email: user.email,
-        role: user.role,
-        company: company || null,
-      },
     });
   } catch (error) {
     next(error);
