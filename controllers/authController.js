@@ -77,6 +77,44 @@ const register = async (req, res, next) => {
     next(error);
   }
 };
+// ─── Verify Email ─────────────────────────────────────────────────────────────
+const verifyEmail = async (req, res, next) => {
+  try {
+    const { email, verificationToken } = req.body;
+
+    if (!email || !verificationToken) {
+      throw new CustomError.BadRequestError("Please provide all details");
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) throw new CustomError.NotFoundError("User not found");
+
+    if (new Date() > user.verificationTokenExpirationDate) {
+      throw new CustomError.BadRequestError(
+        "Verification token expired. Please request a new one.",
+      );
+    }
+
+    if (user.verificationToken !== verificationToken) {
+      throw new CustomError.BadRequestError("Invalid token");
+    }
+
+    user.isVerified = true;
+    user.verificationToken = null;
+    user.verificationTokenExpirationDate = null;
+    await user.save();
+
+    await clearCache("users*");
+
+    res.status(StatusCodes.OK).json({
+      message: "Email verification successful.",
+      success: true,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const resendVerificationEmail = async (req, res, next) => {
   try {
     const { email } = req.body;
@@ -127,46 +165,6 @@ const resendVerificationEmail = async (req, res, next) => {
     next(error);
   }
 };
-const verifyEmail = async (req, res, next) => {
-  try {
-    const { email, verificationToken } = req.body;
-    // check if details are passed
-    if (!email || !verificationToken) {
-      throw new CustomError.BadRequestError("Please provide all details");
-    }
-    // find user based on email
-    const user = await User.findOne({ email });
-    // check if user
-    if (!user) {
-      throw new CustomError.NotFoundError("User not found");
-    }
-    // check expiring of verify code and return
-    if (new Date() > user.verificationTokenExpirationDate) {
-      throw new CustomError.BadRequestError(
-        "Verification token has expired. Please request a new one.",
-      );
-    }
-    // check if verification code is same
-    if (user.verificationToken !== verificationToken) {
-      throw new CustomError.BadRequestError("Invalid token");
-    }
-    // set user as verify and clear verification
-    user.isVerified = true;
-    user.verificationToken = null;
-    user.verificationTokenExpirationDate = null;
-    await user.save();
-    //return res
-    const cacheKey = `users*`;
-    await clearCache(cacheKey);
-    res.status(StatusCodes.OK).json({
-      message: "Email verification successful.",
-      success: true,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
 const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
