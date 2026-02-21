@@ -320,6 +320,7 @@ const logout = async (req, res, next) => {
         if (req.user.id) {
           await Token.updateMany({ user: req.user.id }, { isValid: false }, { new: true });
         }
+        next(error);
       }
     }
 
@@ -334,18 +335,18 @@ const logout = async (req, res, next) => {
     next(error);
   }
 };
+
+// ─── Forgot & Reset Password ─────────────────────────────────────────────────────────────
 const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
     if (!email) {
       throw new CustomError.BadRequestError("Please provide email");
     }
-    console.log("Forgot password request received here", email);
     const user = await User.findOne({ email });
-
-    const resetToken = crypto.randomBytes(70).toString("hex");
-    const expirationDate = new Date(Date.now() + 1000 * 60 * 60);
     if (user) {
+      const resetToken = crypto.randomBytes(70).toString("hex");
+      const expirationDate = new Date(Date.now() + 1000 * 60 * 60);
       user.verificationToken = resetToken;
       user.verificationTokenExpirationDate = expirationDate;
       await user.save();
@@ -367,7 +368,6 @@ const forgotPassword = async (req, res, next) => {
 const resetPassword = async (req, res, next) => {
   try {
     const { email, verificationToken, password } = req.body;
-    console.log("Reset password request received here", email, verificationToken, password);
     if (!email || !verificationToken || !password) {
       throw new CustomError.BadRequestError("Please provide all credentials");
     }
