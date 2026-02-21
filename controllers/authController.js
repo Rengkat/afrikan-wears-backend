@@ -501,6 +501,23 @@ const getActiveSessions = async (req, res, next) => {
     next(error);
   }
 };
+// ─── Revoke Session ───────────────────────────────────────────────────────────
+
+const revokeSession = async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await Token.findOne({ _id: sessionId, user: req.user.id, isValid: true });
+    if (!session) throw new CustomError.NotFoundError("Session not found");
+
+    session.isValid = false;
+    await session.save();
+
+    res.status(StatusCodes.OK).json({ success: true, message: "Session revoked" });
+  } catch (error) {
+    next(error);
+  }
+};
 // ─── Cookie Helper ────────────────────────────────────────────────────────────
 
 const clearAuthCookies = (res) => {
@@ -525,4 +542,6 @@ module.exports = {
   resetPassword,
   refreshTokens,
   validateTokens,
+  getActiveSessions,
+  revokeSession,
 };
