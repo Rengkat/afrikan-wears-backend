@@ -518,6 +518,36 @@ const revokeSession = async (req, res, next) => {
     next(error);
   }
 };
+// ─── Revoke All Other Sessions ────────────────────────────────────────────────
+
+const revokeAllOtherSessions = async (req, res, next) => {
+  try {
+    const { refreshToken: incomingJWT } = req.signedCookies;
+    let currentTokenId = null;
+
+    if (incomingJWT) {
+      try {
+        const payload = isTokenVerified(incomingJWT);
+        const currentToken = await Token.findOne({
+          refreshToken: payload.refreshToken,
+          user: req.user.id,
+        });
+        currentTokenId = currentToken?._id;
+      } catch {
+        // ignore
+      }
+    }
+
+    await Token.updateMany(
+      { user: req.user.id, isValid: true, ...(currentTokenId && { _id: { $ne: currentTokenId } }) },
+      { isValid: false },
+    );
+
+    res.status(StatusCodes.OK).json({ success: true, message: "All other sessions revoked" });
+  } catch (error) {
+    next(error);
+  }
+};
 // ─── Cookie Helper ────────────────────────────────────────────────────────────
 
 const clearAuthCookies = (res) => {
