@@ -3,113 +3,99 @@ const { isTokenVerified, attachTokenToResponse, createUserPayload } = require(".
 const Token = require("../models/tokenModel");
 const crypto = require("crypto");
 const User = require("../models/userModel");
+const clearAuthCookies = require("../utils/helper/clearAuthCookies");
 
 // Main authentication middleware
 const authenticateUser = async (req, res, next) => {
   try {
     const { accessToken, refreshToken } = req.signedCookies;
 
-    // Try access token first
+    // ── Step 1: Try access token ──────────────────────────────────────────────
     if (accessToken) {
       try {
         const payload = isTokenVerified(accessToken);
         req.user = payload.accessToken;
         return next();
-      } catch (accessTokenError) {
-        console.log("Access token expired or invalid:", accessTokenError.message);
-        // Continue to refresh token logic
+      } catch (error) {
+        console.log("Error verifying access token:", error.message);
       }
     }
 
-    // Try refresh token if access token is invalid/missing
-    if (refreshToken) {
-      try {
-        const payload = isTokenVerified(refreshToken);
-
-        const existingRefreshToken = await Token.findOne({
-          user: payload.accessToken.id,
-          refreshToken: payload.refreshToken,
-          isValid: true,
-        });
-
-        if (!existingRefreshToken) {
-          console.log("No valid refresh token found in database");
-          throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
-        }
-
-        // Refresh token is valid - rotate tokens (create new one)
-        const newRefreshToken = crypto.randomBytes(40).toString("hex");
-
-        // Create new token and invalidate old one
-        await Token.create({
-          refreshToken: newRefreshToken,
-          user: payload.accessToken.id,
-          isValid: true,
-        });
-
-        // Optionally: Invalidate old token
-        existingRefreshToken.isValid = false;
-        await existingRefreshToken.save();
-
-        // Find user
-        const user = await User.findById(payload.accessToken.id).select("-password");
-        if (!user) {
-          console.log("User not found for refresh token");
-          throw new CustomError.UnauthenticatedError("User not found. Please log in again.");
-        }
-
-        const userPayload = createUserPayload(user);
-
-        // Attach new tokens to response
-        attachTokenToResponse({
-          res,
-          userPayload,
-          refreshToken: newRefreshToken,
-        });
-
-        req.user = userPayload;
-        return next();
-      } catch (refreshTokenError) {
-        console.log("Refresh token validation failed:", refreshTokenError.message);
-
-        // Only clear cookies for specific JWT errors
-        if (
-          refreshTokenError.name === "JsonWebTokenError" ||
-          refreshTokenError.name === "TokenExpiredError"
-        ) {
-          clearAuthCookies(res);
-        }
-
-        throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
-      }
+    // ── Step 2: Try refresh token ─────────────────────────────────────────────
+    if (!refreshToken) {
+      throw new CustomError.UnauthenticatedError("Authentication required. Please log in.");
     }
 
-    // No tokens available at all
-    console.log("No authentication tokens found");
-    throw new CustomError.UnauthenticatedError("Authentication required. Please log in.");
-  } catch (error) {
-    // Only handle specific JWT errors, let others propagate
-    if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
+    let payload;
+    try {
+      payload = isTokenVerified(refreshToken);
+    } catch (error) {
       clearAuthCookies(res);
-      return next(new CustomError.UnauthenticatedError("Session expired. Please log in again."));
+      throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
     }
 
-    // For other errors (like database errors), don't clear cookies
+    const { accessToken: userPayloadFromJWT, refreshToken: rawRefreshToken } = payload;
+
+    // Look up token — intentionally NOT filtering by isValid so we can detect reuse
+    const existingToken = await Token.findOne({
+      user: userPayloadFromJWT.id,
+      refreshToken: rawRefreshToken,
+    });
+
+    if (!existingToken) {
+      // Not in DB at all — wipe all sessions (possible breach)
+      await Token.updateMany({ user: userPayloadFromJWT.id }, { isValid: false });
+      clearAuthCookies(res);
+      throw new CustomError.UnauthenticatedError(
+        "Invalid session. All sessions have been revoked.",
+      );
+    }
+
+    if (!existingToken.isValid) {
+      // Already rotated/invalidated → reuse detected → possible theft
+      await Token.updateMany({ user: userPayloadFromJWT.id }, { isValid: false });
+      clearAuthCookies(res);
+      throw new CustomError.UnauthenticatedError(
+        "Token reuse detected. All sessions have been revoked for your safety.",
+      );
+    }
+
+    if (existingToken.expiresAt < new Date()) {
+      existingToken.isValid = false;
+      await existingToken.save();
+      clearAuthCookies(res);
+      throw new CustomError.UnauthenticatedError("Session expired. Please log in again.");
+    }
+
+    // ── Step 3: Fetch user ────────────────────────────────────────────────────
+    const user = await User.findById(userPayloadFromJWT.id).select("-password");
+    if (!user) {
+      clearAuthCookies(res);
+      throw new CustomError.UnauthenticatedError("User not found. Please log in again.");
+    }
+
+    // ── Step 4: Rotate in place (update same doc, zero new documents) ─────────
+    const newRefreshToken = crypto.randomBytes(40).toString("hex");
+    const newExpiresAt = new Date();
+    newExpiresAt.setDate(newExpiresAt.getDate() + 7);
+
+    existingToken.refreshToken = newRefreshToken;
+    existingToken.lastUsed = new Date();
+    existingToken.expiresAt = newExpiresAt;
+    existingToken.deviceInfo = {
+      ...existingToken.deviceInfo,
+      ip: req.ip,
+    };
+    await existingToken.save();
+
+    const userPayload = createUserPayload(user);
+    attachTokenToResponse({ res, userPayload, refreshToken: newRefreshToken });
+
+    req.user = userPayload;
+    return next();
+  } catch (error) {
     next(error);
   }
-};
-
-// Helper function to clear auth cookies
-const clearAuthCookies = (res) => {
-  const options = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    path: "/",
-  };
-
-  res.cookie("accessToken", "", { ...options, maxAge: 0 });
-  res.cookie("refreshToken", "", { ...options, maxAge: 0 });
 };
 
 // Generic authorization middleware
@@ -148,7 +134,6 @@ const customerAuthorization = (req, res, next) => {
   next();
 };
 
-// Improved ownership check with better validation
 const checkStylistOwnership = (req, res, next) => {
   const { id } = req.params;
   const { role, company } = req.user;
