@@ -8,6 +8,17 @@ const crypto = require("crypto");
 const sendVerificationEmail = require("../utils/Email/sendVerificationMail");
 const { StatusCodes } = require("http-status-codes");
 const { clearCache } = require("../utils/redisClient");
+// ─── Helpers ────────────────────────────────────────────────────────────────
+const getDeviceInfo = (req) => ({
+  ip: req.ip,
+  userAgent: req.headers["user-agent"],
+  deviceId: req.headers["x-device-id"] || crypto.randomBytes(16).toString("hex"),
+});
+const getTokenExpity = () => {
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+  return expiresAt;
+};
 const register = async (req, res, next) => {
   try {
     const { firstName, surname, email, password, companyName } = req.body;
@@ -145,7 +156,7 @@ const verifyEmail = async (req, res, next) => {
     // check expiring of verify code and return
     if (new Date() > user.verificationTokenExpirationDate) {
       throw new CustomError.BadRequestError(
-        "Verification token has expired. Please request a new one."
+        "Verification token has expired. Please request a new one.",
       );
     }
     // check if verification code is same
