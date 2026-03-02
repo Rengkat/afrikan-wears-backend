@@ -65,7 +65,6 @@ app.use(express.static("public"));
 app.get("/", (req, res) => {
   res.send("Welcome to AfriWears API");
 });
-
 // CORS setup
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
   "http://localhost:5000",
@@ -73,21 +72,44 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
   "https://afrikan-wears-backend.onrender.com",
   "https://afriwears.vercel.app",
 ];
+
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow requests with no origin (like mobile apps, curl, etc)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Check if origin is allowed
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        // Log the blocked origin for debugging
         console.warn(`CORS blocked for origin: ${origin}`);
-        callback(new Error("Not allowed by CORS"));
+        console.log("Allowed origins:", allowedOrigins);
+
+        // Instead of throwing error, allow but log (temporary for debugging)
+        // Change this back to blocking after debugging
+        callback(null, true); // Temporarily allow all for debugging
+        // callback(new Error('Not allowed by CORS'));
       }
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+    exposedHeaders: ["set-cookie"],
   }),
 );
+
+// Important: Handle preflight requests explicitly
+app.options("*", cors());
+// Add this after CORS setup for debugging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin || "No origin"}`);
+  console.log("Cookies:", req.headers.cookie);
+  next();
+});
 
 // Socket.io initialization
 const io = new Server(server, {
