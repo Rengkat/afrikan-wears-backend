@@ -23,12 +23,12 @@ const getNotifications = async (req, res, next) => {
   }
 };
 
-const markAsRead = async (req, res) => {
+const markAsRead = async (req, res, next) => {
   try {
     const notification = await Notification.findOneAndUpdate(
       { _id: req.params.id, recipient: req.user.id },
       { read: true },
-      { new: true }
+      { new: true },
     );
 
     if (!notification) {
@@ -44,7 +44,7 @@ const markAsRead = async (req, res) => {
   }
 };
 
-const getUnreadCount = async (req, res) => {
+const getUnreadCount = async (req, res, next) => {
   try {
     const count = await Notification.countDocuments({
       recipient: req.user.id,
@@ -60,7 +60,7 @@ const getUnreadCount = async (req, res) => {
   }
 };
 
-const deleteNotification = async (req, res) => {
+const deleteNotification = async (req, res, next) => {
   try {
     const notification = await Notification.findOneAndDelete({
       _id: req.params.id,

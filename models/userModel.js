@@ -43,7 +43,7 @@ const UserSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 UserSchema.virtual("addresses", {
   ref: "Address",

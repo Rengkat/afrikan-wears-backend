@@ -1,8 +1,10 @@
 const jwt = require("jsonwebtoken");
-const createJwt = ({ payload }) => {
+
+const createJWT = ({ payload }) => {
   const token = jwt.sign(payload, process.env.JWT_SECRET);
   return token;
 };
+
 const isTokenVerified = (token) => jwt.verify(token, process.env.JWT_SECRET);
 const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
   const accessTokenJWT = createJWT({

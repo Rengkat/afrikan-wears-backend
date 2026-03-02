@@ -71,6 +71,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
   "http://localhost:5000",
   "http://localhost:3000",
   "https://afrikan-wears-backend.onrender.com",
+  "https://afriwears.vercel.app",
 ];
 app.use(
   cors({

@@ -1,3 +1,5 @@
+const crypto = require("crypto");
+
 const getDeviceInfo = (req) => ({
   ip: req.ip,
   userAgent: req.headers["user-agent"],
