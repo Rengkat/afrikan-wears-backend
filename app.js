@@ -77,18 +77,13 @@ app.use(
   cors({
     origin: function (origin, callback) {
       // Allow requests with no origin (like mobile apps, curl, etc)
-      if (!origin) {
-        return callback(null, true);
-      }
+      if (!origin) return callback(null, true);
 
       // Check if origin is allowed
-      if (allowedOrigins.includes(origin)) {
+      if (allowedOrigins.includes(origin) || origin.includes("vercel.app")) {
         callback(null, true);
       } else {
-        console.warn(`CORS blocked for origin: ${origin}`);
-        console.log("Allowed origins:", allowedOrigins);
-
-        callback(null, true);
+        callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
@@ -100,12 +95,6 @@ app.use(
 
 // Important: Handle preflight requests explicitly
 app.options("*", cors());
-// Add this after CORS setup for debugging
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin || "No origin"}`);
-  console.log("Cookies:", req.headers.cookie);
-  next();
-});
 
 // Socket.io initialization
 const io = new Server(server, {

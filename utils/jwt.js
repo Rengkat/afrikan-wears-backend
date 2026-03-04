@@ -19,15 +19,12 @@ const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
 
   const isProduction = process.env.NODE_ENV === "production";
 
-  // IMPORTANT: Set the domain for production
-  const cookieDomain = isProduction ? ".onrender.com" : undefined;
   const cookieDefaults = {
     httpOnly: true,
     secure: isProduction,
     signed: true,
     sameSite: isProduction ? "none" : "lax",
     path: "/",
-    domain: cookieDomain,
   };
 
   res.cookie("accessToken", accessTokenJWT, {
@@ -39,8 +36,6 @@ const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
     ...cookieDefaults,
     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
   });
-
-  console.log(`[Auth] Cookies set for domain: ${cookieDomain || "default"}`);
 };
 
 module.exports = { attachTokenToResponse, isTokenVerified };
