@@ -85,14 +85,10 @@ app.use(
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        // Log the blocked origin for debugging
         console.warn(`CORS blocked for origin: ${origin}`);
         console.log("Allowed origins:", allowedOrigins);
 
-        // Instead of throwing error, allow but log (temporary for debugging)
-        // Change this back to blocking after debugging
-        callback(null, true); // Temporarily allow all for debugging
-        // callback(new Error('Not allowed by CORS'));
+        callback(null, true);
       }
     },
     credentials: true,
