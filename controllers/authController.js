@@ -285,7 +285,7 @@ const validateTokens = async (req, res, next) => {
           return res.status(StatusCodes.OK).json({ valid: true, user: payload.accessToken });
         }
       } catch (error) {
-        throw CustomError.UnauthenticatedError("Invalid tokens");
+        throw new CustomError.UnauthenticatedError("Invalid tokens");
       }
     }
 
