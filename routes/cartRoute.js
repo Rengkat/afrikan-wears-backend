@@ -7,13 +7,15 @@ const {
   getAllCartProducts,
   clearCart,
   moveToWishlist,
+  mergeCart,
 } = require("../controllers/cartController");
 const { authenticateUser, authorize } = require("../middleware/authentication");
 
 router
   .route("/")
   .post(authenticateUser, authorize("user"), addToCart)
-  .get(authenticateUser, authorize("user"), getAllCartProducts);
+  .get(authenticateUser, getAllCartProducts);
+router.post("/merge", authenticateUser, mergeCart);
 router.post("/clear-cart", authenticateUser, clearCart);
 router.route("/move-to-wishlist").post(authenticateUser, authorize("user"), moveToWishlist);
 

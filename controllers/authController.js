@@ -10,7 +10,7 @@ const { StatusCodes } = require("http-status-codes");
 const { clearCache } = require("../utils/redisClient");
 const clearAuthCookies = require("../utils/helper/clearAuthCookies");
 const getDeviceInfo = require("../utils/helper/getDeviceInfo");
-const getTokenExpity = require("../utils/helper/getTokenExpity");
+const getTokenExpiry = require("../utils/helper/getTokenExpiry");
 
 // ─── Controllers ─────────────────────────────────────────────────────────────
 const register = async (req, res, next) => {
@@ -187,7 +187,7 @@ const login = async (req, res, next) => {
     // Create access token
     const deviceInfo = getDeviceInfo(req);
     const refreshToken = crypto.randomBytes(40).toString("hex");
-    const expiresAt = getTokenExpity();
+    const expiresAt = getTokenExpiry();
     const MAX_SESSIONS = 5;
 
     //Count active valid sessions for this user

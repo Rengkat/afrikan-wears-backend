@@ -334,11 +334,83 @@ const moveToWishlist = async (req, res, next) => {
     session.endSession();
   }
 };
+const mergeCart = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { items } = req.body;
+    const userId = req.user.id;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      throw new CustomError.BadRequestError("Please provide items to merge");
+    }
+
+    let cart = await Cart.findOne({ user: userId }).session(session);
+
+    if (!cart) {
+      cart = await Cart.create([{ user: userId, items: [] }], { session });
+      cart = cart[0];
+    }
+
+    for (const item of items) {
+      const { productId, quantity } = item;
+
+      if (!productId || !quantity || quantity <= 0) continue;
+      if (!mongoose.Types.ObjectId.isValid(productId)) continue;
+
+      const product = await Product.findById(productId).session(session);
+      if (!product) continue;
+
+      const existingIndex = cart.items.findIndex((i) => i.product.toString() === productId);
+
+      if (existingIndex > -1) {
+        // Add guest quantity to existing DB quantity
+        const newQty = cart.items[existingIndex].quantity + quantity;
+        // Cap at available stock
+        cart.items[existingIndex].quantity = Math.min(newQty, product.stock);
+      } else {
+        cart.items.push({
+          product: productId,
+          quantity: Math.min(quantity, product.stock),
+          price: product.price,
+        });
+      }
+    }
+
+    await cart.save({ session });
+    await session.commitTransaction();
+    await clearCache(`cart:${userId}`);
+
+    // Return populated cart
+    const updatedCart = await Cart.findOne({ user: userId }).populate({
+      path: "items.product",
+      select: "name price mainImage stock",
+    });
+
+    const total = updatedCart.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Cart merged successfully",
+      data: {
+        items: updatedCart.items,
+        total: parseFloat(total.toFixed(2)),
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    next(error);
+  } finally {
+    session.endSession();
+  }
+};
 module.exports = {
   addToCart,
   removeFromCart,
   updateCart,
   getAllCartProducts,
+  mergeCart,
   clearCart,
   moveToWishlist,
 };
