@@ -1,8 +1,9 @@
 const clearAuthCookies = (res) => {
+  const isProduction = process.env.NODE_ENV === "production";
   const opts = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
     path: "/",
   };
   res.cookie("accessToken", "", { ...opts, maxAge: 0 });

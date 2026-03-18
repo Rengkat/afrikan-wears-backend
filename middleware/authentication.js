@@ -8,7 +8,7 @@ const clearAuthCookies = require("../utils/helper/clearAuthCookies");
 // Main authentication middleware
 const authenticateUser = async (req, res, next) => {
   try {
-    const { accessToken, refreshToken } = req.signedCookies;
+    const { accessToken, refreshToken } = req.cookies;
 
     // ── Step 1: Try access token ──────────────────────────────────────────────
     if (accessToken) {

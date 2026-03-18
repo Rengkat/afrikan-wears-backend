@@ -264,7 +264,7 @@ const getCurrentUser = async (req, res, next) => {
 // ─── Validate Tokens (for Next.js middleware) ─────────────────────────────────────────────────────────────
 const validateTokens = async (req, res, next) => {
   try {
-    const { accessToken, refreshToken } = req.signedCookies;
+    const { accessToken, refreshToken } = req.cookies;
 
     if (accessToken) {
       const payload = isTokenVerified(accessToken);
@@ -298,7 +298,7 @@ const validateTokens = async (req, res, next) => {
 // ─── Logout ─────────────────────────────────────────────────────────────
 const logout = async (req, res, next) => {
   try {
-    const { refreshToken: incomingJWT } = req.signedCookies;
+    const { refreshToken: incomingJWT } = req.cookies;
     if (incomingJWT) {
       try {
         const payload = isTokenVerified(incomingJWT);
@@ -389,7 +389,7 @@ const resetPassword = async (req, res, next) => {
 // ─── Refresh Tokens ─────────────────────────────────────────────────────────────
 const refreshTokens = async (req, res, next) => {
   try {
-    const { refreshToken: incomingJWT } = req.signedCookies;
+    const { refreshToken: incomingJWT } = req.cookies;
 
     if (!incomingJWT) {
       throw new CustomError.UnauthenticatedError("No refresh token provided");
@@ -515,7 +515,7 @@ const revokeSession = async (req, res, next) => {
 
 const revokeAllOtherSessions = async (req, res, next) => {
   try {
-    const { refreshToken: incomingJWT } = req.signedCookies;
+    const { refreshToken: incomingJWT } = req.cookies;
     let currentTokenId = null;
 
     if (incomingJWT) {

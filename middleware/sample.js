@@ -1,6 +1,6 @@
 const authenticateUser = async (req, res, next) => {
   try {
-    const { accessToken, refreshToken } = req.signedCookies;
+    const { accessToken, refreshToken } = req.cookies;
     if (accessToken) {
       const payload = isTokenVerified(accessToken);
       req.user = payload.accessToken;
@@ -17,7 +17,7 @@ const authenticateUser = async (req, res, next) => {
 
       if (!existingRefreshToken || !existingRefreshToken.isValid) {
         throw new CustomError.UnauthenticatedError(
-          "Authentication invalid - Refresh token invalid or expired"
+          "Authentication invalid - Refresh token invalid or expired",
         );
       }
 
@@ -50,7 +50,7 @@ const authenticateUser = async (req, res, next) => {
         ...options,
       });
       return next(
-        new CustomError.UnauthenticatedError("Authentication invalid - Please log in again")
+        new CustomError.UnauthenticatedError("Authentication invalid - Please log in again"),
       );
     }
     next(error);

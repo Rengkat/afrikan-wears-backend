@@ -1,8 +1,7 @@
 const jwt = require("jsonwebtoken");
 
-const createJWT = ({ payload }) => {
-  const token = jwt.sign(payload, process.env.JWT_SECRET);
-  return token;
+const createJWT = ({ payload, expiresIn }) => {
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 };
 
 const isTokenVerified = (token) => jwt.verify(token, process.env.JWT_SECRET);
@@ -22,7 +21,6 @@ const attachTokenToResponse = ({ res, userPayload, refreshToken }) => {
   const cookieDefaults = {
     httpOnly: true,
     secure: isProduction,
-    signed: true,
     sameSite: isProduction ? "none" : "lax",
     path: "/",
   };
